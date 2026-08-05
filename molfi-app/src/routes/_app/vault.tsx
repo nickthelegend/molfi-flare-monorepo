@@ -164,7 +164,9 @@ function VaultPage() {
             <img src={USDC_LOGO} alt="USDC" className="h-7 w-7 rounded-full" loading="lazy" />
             <div className="leading-tight">
               <p className="text-sm font-semibold text-foreground">FXRP</p>
-              <p className="text-[11px] text-muted-foreground">USD-pegged · Molfi testnet</p>
+              {/* FXRP is XRP-backed, not USD-pegged — it is a 1:1
+                  over-collateralized claim on XRP held by FAssets agents. */}
+              <p className="text-[11px] text-muted-foreground">XRP-backed · FAssets on Coston2</p>
             </div>
           </div>
           <div>
