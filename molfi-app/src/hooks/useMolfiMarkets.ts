@@ -5,7 +5,7 @@ import type { LeverxMarketRow } from "@/lib/leverx/indexer-markets";
 
 /**
  * Markets feed for /markets. Crypto is the live venue — REAL on-chain markets
- * created + settled on the predict-escrow contract via the Reflector oracle
+ * created + settled on the predict-escrow contract via the FTSOv2 oracle
  * (betting escrows real FXRP). Other categories are coming soon.
  */
 export function useMolfiMarkets(args: {

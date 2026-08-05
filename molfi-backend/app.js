@@ -365,22 +365,38 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
     try {
       const m = await OnchainMarkets.findOne({ _id: req.params.id });
       if (m) return res.json(await enrichOnChainDoc(m));
-      // Not indexed — read MolfiMarket directly.
-      const mk = await chain.getMarket(req.params.id);
+      // Not indexed — read MolfiMarket directly, with the same enrichment the
+      // list endpoint does. Returning null strike/spot here left the trade
+      // terminal showing "…" and "–" for a market whose price is on-chain.
+      const mk = await chain.getMarketFull(req.params.id);
       if (!mk) return res.status(404).json({ error: "not found" });
       const resolved = mk.status === 2;
+
+      const FEED_SYM = Object.fromEntries(
+        Object.entries(chain.FEEDS).map(([sym, feed]) => [String(feed).toLowerCase(), sym]),
+      );
+      const symbol = FEED_SYM[String(mk.feedId).toLowerCase()] ?? "";
+      const spot = symbol ? (lastPrice[symbol] ?? null) : null;
+      const cadence = Number(/\((\d+)m\)/.exec(mk.question)?.[1]) || undefined;
+      const pools = await chain.escrowPools(req.params.id).catch(() => ({ yes: 0, no: 0 }));
+
       res.json({
         marketId: req.params.id,
-        symbol: "",
-        icon: "",
+        symbol,
+        icon: symbol ? icon(symbol) : "",
         question: mk.question,
         closeTs: mk.closeTs * 1000,
+        cadenceMins: cadence,
         oracle: "ftso",
         resolved,
         outcome: resolved ? mk.outcome : null,
-        strike: null,
-        spot: null,
-        yesPrice: resolved ? (mk.outcome === 0 ? 1 : 0) : 0.5,
+        strike: mk.strike ?? null,
+        spot,
+        yesPrice: resolved
+          ? mk.outcome === 0 ? 1 : 0
+          : impliedYes(spot, mk.strike ?? null, mk.closeTs * 1000, Date.now()),
+        oi: r2(pools.yes + pools.no),
+        bets: 0,
       });
     } catch (e) {
       res.status(500).json({ error: e.message });

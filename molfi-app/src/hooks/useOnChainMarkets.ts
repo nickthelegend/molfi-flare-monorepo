@@ -5,7 +5,7 @@ import type { LeverxMarketRow } from "@/lib/leverx/indexer-markets";
 
 /**
  * The real on-chain crypto markets — created + settled by the backend keeper on
- * the predict-escrow contract via the live Reflector oracle. These are the
+ * the predict-escrow contract via the live FTSOv2 oracle. These are the
  * markets the Crypto tab shows; betting on them escrows real FXRP.
  */
 export function useOnChainMarkets(status: "open" | "closed" = "open") {

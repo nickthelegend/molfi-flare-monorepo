@@ -73,7 +73,14 @@ import {
 } from "@/lib/leverx/tw";
 import { cn } from "@/lib/utils";
 
-const HEX64 = /^[0-9a-fA-F]{64}$/;
+/**
+ * A Molfi market id is a bytes32 — 64 hex chars, with or without the `0x`
+ * prefix. The prefix must be optional: the grid links to ids exactly as the
+ * contract and backend emit them (0x-prefixed), so a matcher that requires bare
+ * hex silently routes every real market to the "reference market" placeholder
+ * below instead of the trading terminal.
+ */
+const HEX64 = /^(0x)?[0-9a-fA-F]{64}$/;
 
 function BackLink() {
   return (
@@ -131,9 +138,13 @@ function fmtRemaining(ms: number): string {
   return `${sec}s`;
 }
 
-function fmtUsd(v: number | null | undefined, symbol: string): string {
+function fmtUsd(v: number | null | undefined, _symbol: string): string {
   if (v == null) return "…";
-  return `$${v.toLocaleString(undefined, { maximumFractionDigits: symbol === "XLM" ? 4 : 0 })}`;
+  // Precision has to follow magnitude, not a per-symbol allow-list. Molfi lists
+  // XRP (~$1.06) and FLR (~$0.006) next to BTC, and rounding those to whole
+  // dollars renders both the spot and the strike as "$1" and "$0".
+  const digits = v >= 100 ? 0 : v >= 1 ? 4 : 6;
+  return `$${v.toLocaleString(undefined, { maximumFractionDigits: digits })}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +451,7 @@ function BackendDetail({ id }: { id: string }) {
 
 // ---------------------------------------------------------------------------
 // On-chain Stellar market (hex id) — the premium terminal, wired to the
-// predict-escrow contract + Reflector oracle. Real FXRP escrow.
+// predict-escrow contract + FTSOv2 oracle. Real FXRP escrow.
 // ---------------------------------------------------------------------------
 
 /** YES order book — indicative depth around the live odds, plus the REAL
@@ -821,7 +832,7 @@ function OnChainDetail({ id }: { id: string }) {
     setPlacing(true);
     try {
       const sideLabel = side === OUTCOME.YES ? "YES" : "NO";
-      // Default path: a fresh BLS12-381 Groth16 proof, verified ON-CHAIN inside
+      // Default path: a fresh BN254 Groth16 proof, verified ON-CHAIN inside
       // bet_zk (nullifier burned). Falls back to a transparent bet only if the
       // proof service is unreachable (so a single wallet prompt either way).
       let zk = null;
@@ -907,7 +918,7 @@ function OnChainDetail({ id }: { id: string }) {
             <AssetBadge asset={m.symbol} iconUrl={m.icon} size="md" />
             <div className="min-w-0 flex-1">
               <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                ⛓️ On-chain · 🔒 ZK-verified · Reflector-settled
+                ⛓️ On-chain · 🔒 ZK-verified · FTSOv2-settled
               </span>
               <h1 className={tradeTerminalTitle}>{m.question}</h1>
               <Link to="/markets" className={tradeTerminalBack}>
@@ -935,7 +946,7 @@ function OnChainDetail({ id }: { id: string }) {
               <StatItem label={`${m.symbol} spot`} value={fmtUsd(m.spot, m.symbol)} />
               <StatItem label="Strike" value={fmtUsd(m.strike, m.symbol)} />
               <StatItem label="YES odds" value={`${yesPct}%`} />
-              <StatItem label="Oracle" value="Reflector" />
+              <StatItem label="Oracle" value="FTSOv2" />
               <StatItem
                 label="Closes"
                 value={resolved ? "Resolved" : closed ? "Settling" : fmtRemaining(remaining)}
@@ -963,7 +974,7 @@ function OnChainDetail({ id }: { id: string }) {
               userWon ? (
                 <div className="space-y-3 rounded-xl border border-border bg-card p-4">
                   <p className="text-sm">
-                    <span className="text-muted-foreground">Settled by Reflector — </span>
+                    <span className="text-muted-foreground">Settled by FTSOv2 — </span>
                     <strong className="text-[var(--long-text)]">{winLabel} wins. You won! 🎉</strong>
                   </p>
                   <Button onClick={handleRedeem} disabled={redeeming} className="w-full gap-1.5" size="lg">
@@ -973,7 +984,7 @@ function OnChainDetail({ id }: { id: string }) {
                 </div>
               ) : (
                 <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                  Settled on-chain by Reflector —{" "}
+                  Settled on-chain by FTSOv2 —{" "}
                   <strong className="text-foreground">{winLabel}</strong> wins.
                   {userBetSide && userBetSide !== winLabel
                     ? ` Your ${userBetSide} position didn't win this time — nothing to redeem.`
@@ -984,7 +995,7 @@ function OnChainDetail({ id }: { id: string }) {
               )
             ) : closed ? (
               <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                Market closed — settling from the Reflector oracle. Check back shortly to redeem.
+                Market closed — settling from the FTSOv2 oracle. Check back shortly to redeem.
               </div>
             ) : (
               <div className="space-y-3 rounded-xl border border-border bg-card p-4">
@@ -1087,7 +1098,7 @@ function OnChainDetail({ id }: { id: string }) {
                       {address ? `Bet on-chain · ${side === OUTCOME.YES ? "YES" : "NO"}` : "Connect wallet"}
                     </Button>
                     <p className="text-center text-[11px] text-muted-foreground">
-                      🔒 Each bet submits a BLS12-381 Groth16 proof verified on-chain · real FXRP escrow · Reflector-settled
+                      🔒 Each bet submits a BN254 Groth16 proof verified on-chain · real FXRP escrow · FTSOv2-settled
                     </p>
                   </>
                 )}

@@ -234,7 +234,7 @@ export interface ZkProof {
   domain: string;
 }
 
-/** Fresh BLS12-381 Groth16 proof for a ZK-gated bet (verified on-chain). */
+/** Fresh BN254 Groth16 proof for a ZK-gated bet (verified on-chain). */
 export async function fetchZkProof(): Promise<ZkProof> {
   const r = await fetch(`${BASE}/api/zk/proof`);
   if (!r.ok) throw new Error("ZK proof service unavailable");
