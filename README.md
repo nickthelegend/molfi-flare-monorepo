@@ -85,6 +85,7 @@ payout 0.0588 FXRP (expected 0.0588)   ← pot minus the 2% fee
 | [`molfi-contracts`](./molfi-contracts) | Solidity — market lifecycle, FXRP escrow, FTSO oracle adapter, ZK verifier (Hardhat) |
 | [`molfi-backend`](./molfi-backend) | Market engine — seeds rolling markets, serves on-chain state, prices from FTSO |
 | [`molfi-app`](./molfi-app) | Trading UI — React + Vite + wagmi/viem on Coston2 |
+| [`molfi-mcp`](./molfi-mcp) | **MCP server** — any MCP agent browses markets, stakes FXRP, settles, redeems |
 | [`molfi-predict-sdk`](./molfi-predict-sdk) | Agent SDK + `SKILL.md` — an LLM agent can run the full lifecycle |
 | [`molfi-circuits`](./molfi-circuits) | Circom BN254 circuits + proving artifacts |
 
@@ -112,6 +113,8 @@ needed to try the app.
 |---|---|---|
 | `molfi-contracts` | `npx hardhat test` | **56/56** |
 | `molfi-predict-sdk` | `npm test` | **12/12** |
+| `molfi-mcp` | `npm test` | **11/11** |
+| `molfi-mcp` | `npm run selftest` | live on Coston2 — reads + a real bet |
 | live e2e | `npx hardhat run scripts/e2e-live.ts --network coston2` | passing on Coston2 |
 
 ## Two things Coston2 taught us
@@ -150,6 +153,9 @@ circuit design, and the Avalanche/Fuji implementation it was ported from.
   inherited from the upstream fork and therefore never resolved, freezing every
   screen on its loading skeleton.
 - The agent SDK and `SKILL.md` re-pointed at Coston2/FXRP.
+- **`molfi-mcp`, new in this hackathon** — an MCP server exposing eight Molfi
+  tools so any MCP-capable agent can trade the markets directly. Verified by a
+  live self-test that places a real FXRP bet on Coston2.
 
 **Corrected while porting:** the Avalanche README advertised eERC confidential
 stakes. That was never implemented in code — a full audit found eERC only in two

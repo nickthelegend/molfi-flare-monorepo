@@ -1,0 +1,20 @@
+{
+  "name": "@molfi/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server for Molfi on Flare — an agent can browse FXRP-collateralized prediction markets, place bets, and redeem, all settled by FTSOv2",
+  "type": "module",
+  "bin": { "molfi-mcp": "./src/index.mjs" },
+  "main": "./src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.mjs\"",
+    "selftest": "node scripts/selftest.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "viem": "^2.21.0",
+    "zod": "^3.23.8"
+  },
+  "engines": { "node": ">=22" }
+}
