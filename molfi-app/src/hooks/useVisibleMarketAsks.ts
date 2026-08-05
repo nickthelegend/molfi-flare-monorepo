@@ -121,7 +121,15 @@ export function useVisibleMarketAsks(markets: readonly LeverxMarketRow[]) {
 
   return {
     markets: enrichedMarkets,
-    isLoading: marketKeys.length > 0 && query.isPending && !query.data,
+    // Only "loading" when the quote query can actually run. Without a protocol
+    // config the query is disabled, and a disabled React Query stays `pending`
+    // forever — which pinned the whole market grid on skeletons indefinitely.
+    //
+    // Molfi's markets are pari-mutuel and priced by the backend from the FTSO
+    // feed; there is no external order-book to quote against, so the absence of
+    // that config is the normal state here, not a transient one.
+    isLoading:
+      Boolean(cfg) && marketKeys.length > 0 && query.isPending && !query.data,
     isFetching: query.isFetching,
   };
 }

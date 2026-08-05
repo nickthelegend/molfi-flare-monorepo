@@ -410,19 +410,46 @@ export async function fetchOnChainMarkets(
   return r.json();
 }
 
-/** Map an on-chain (predict-escrow + Reflector) market into the rich grid row. */
+/**
+ * The grid inherited a raw-integer price convention from the upstream app:
+ * `strikeRaw` is a USD price scaled by 1e9, and the cards divide by 1e9 to
+ * display it. Molfi's backend speaks plain USD floats, so the conversion has to
+ * happen here — a market whose `strikeRaw` stays 0 renders its strike and its
+ * spot delta as "—" even though the price is present.
+ */
+const USD_RAW_SCALE = 1e9;
+const toStrikeRaw = (usd: number | null | undefined): number =>
+  usd != null && Number.isFinite(usd) && usd > 0 ? Math.round(usd * USD_RAW_SCALE) : 0;
+
+/**
+ * `lastAskPremium` uses the same 1e9 raw convention: it is a PROBABILITY scaled
+ * by 1e9, which `premiumToCents` converts with `(premium / 1e9) * 100`.
+ *
+ * Passing a percentage here (0.537 → 53.7) makes the payout multiplier
+ * `100 / ((53.7 / 1e9) * 100)` ≈ 18,689,121x — a number so large it reads as a
+ * rendering glitch rather than a unit error, which is exactly how it shipped.
+ */
+const toPremiumRaw = (probability: number | null | undefined): number | null =>
+  probability != null && Number.isFinite(probability) && probability > 0
+    ? Math.round(probability * USD_RAW_SCALE)
+    : null;
+
+/** Map an on-chain (MolfiMarket + PredictEscrow) market into the rich grid row. */
 export function onChainMarketToRow(m: OnChainMarketRef): LeverxMarketRow {
   return {
     id: m.marketId,
     oracleId: m.marketId,
     asset: m.symbol,
     strike: m.strike ?? 0,
-    strikeRaw: 0,
+    strikeRaw: toStrikeRaw(m.strike),
     higherStrikeRaw: 0,
+    // Live FTSO price for this market's feed — drives the "current price"
+    // readout and the strike-vs-spot delta.
+    spotPrice: m.spot ?? null,
     expiry: m.closeTs,
     isUp: true,
     isRange: false,
-    lastAskPremium: m.yesPrice != null ? m.yesPrice * 100 : null,
+    lastAskPremium: toPremiumRaw(m.yesPrice),
     quotePaused: false,
     volume: m.oi ?? 0,
     status: m.resolved ? "resolved" : "active",
@@ -447,7 +474,7 @@ export function backendMarketToRow(m: BackendMarket): LeverxMarketRow {
     expiry: m.closeTs,
     isUp: true,
     isRange: false,
-    lastAskPremium: m.yesPrice != null ? m.yesPrice * 100 : null,
+    lastAskPremium: toPremiumRaw(m.yesPrice),
     quotePaused: false,
     volume: m.oi ?? 0,
     status: m.status === "resolved" ? "resolved" : "active",

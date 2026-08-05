@@ -176,8 +176,40 @@ function chartAssetForOracle(oracles: readonly PredictOracleSummary[], oracleId:
   return baseFromUnderlying(oracle?.underlying_asset ?? "") || oracleId.slice(2, 6).toUpperCase();
 }
 
+/**
+ * Resolve to null if `p` hasn't settled within `ms`.
+ *
+ * Used to keep route loaders from waiting on services that may not exist in a
+ * given deployment. `Promise.allSettled` is not enough on its own: a request
+ * that hangs (or a query that keeps retrying) never settles at all.
+ */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    p.catch(() => null),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
+/**
+ * Hydrate optional caches for the `_app` shell — and never block on them.
+ *
+ * Both of these reach upstream infrastructure inherited from the app this UI
+ * was forked from (a Sui indexer on :3100 and Sui fullnode oracles). Molfi on
+ * Flare reads its markets from the Molfi backend and settles via FTSOv2, so
+ * neither service exists here.
+ *
+ * This previously did `await Promise.all([...])`. When those requests hang or
+ * keep retrying, the layout loader never resolves — and because every screen
+ * (markets, portfolio, vault, leaderboard, guide) lives under `_app`, the whole
+ * app sits on its pending skeletons indefinitely. The data is optional, so the
+ * shell must render regardless of whether it arrives.
+ */
 export async function loadAppShell(queryClient: QueryClient) {
-  await Promise.all([ensurePredictOracles(queryClient), ensureIndexerProtocol(queryClient)]);
+  const OPTIONAL_HYDRATION_MS = 2_000;
+  await Promise.allSettled([
+    withTimeout(ensurePredictOracles(queryClient), OPTIONAL_HYDRATION_MS),
+    withTimeout(ensureIndexerProtocol(queryClient), OPTIONAL_HYDRATION_MS),
+  ]);
 }
 
 export async function loadMarketsRoute(queryClient: QueryClient) {

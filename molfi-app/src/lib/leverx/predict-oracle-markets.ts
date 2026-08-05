@@ -240,8 +240,17 @@ export function gridUpDisplayRow(row: LeverxMarketRow): LeverxMarketRow {
   const minStrikeRaw = row.minStrikeRaw ?? 0;
   const tickSizeRaw = row.tickSizeRaw ?? 0;
 
+  // Only re-strike to at-the-money when the market actually has a strike
+  // ladder. Molfi's markets are FIXED-strike binaries — the strike is written
+  // on-chain at creation and is the exact number settlement compares against —
+  // so they carry no ladder. Without this guard `atmStrikeRaw` falls through to
+  // "tick <= 0 → return spotRaw", which silently displays the live spot as the
+  // strike: the card then shows a strike the market will never settle on, and
+  // the strike-vs-spot delta always reads zero.
+  const hasStrikeLadder = minStrikeRaw > 0 || tickSizeRaw > 0;
+
   const atmStrike =
-    spot != null && spot > 0
+    hasStrikeLadder && spot != null && spot > 0
       ? atmStrikeRaw(spot, minStrikeRaw, tickSizeRaw)
       : 0;
 
