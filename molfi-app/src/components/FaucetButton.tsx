@@ -34,12 +34,14 @@ export function FaucetButton({ className }: { className?: string }) {
     window.open(FAUCET_URL, "_blank", "noopener,noreferrer");
   };
 
-  const balanceLabel =
-    address && balance != null
-      ? `${(Number(balance) / FXRP_UNIT).toLocaleString(undefined, {
-          maximumFractionDigits: 2,
-        })} FXRP`
-      : "Get FXRP";
+  // FXRP carries 6 decimals; a 0.001 balance rounded to 2 reads as "0 FXRP",
+  // which looks like an empty wallet. Widen precision only for small balances.
+  const balanceLabel = (() => {
+    if (!address || balance == null) return "Get FXRP";
+    const v = Number(balance) / FXRP_UNIT;
+    const digits = v > 0 && v < 0.01 ? 6 : 2;
+    return `${v.toLocaleString(undefined, { maximumFractionDigits: digits })} FXRP`;
+  })();
 
   return (
     <Button

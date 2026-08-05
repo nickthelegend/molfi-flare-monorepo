@@ -7,14 +7,29 @@ import { PnlChart, type PnlPoint } from "@/components/PnlChart";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   fetchPositions,
+  fetchOnChainPositionsForWallet,
   fetchBackendMarkets,
   type BackendPosition,
   type BackendMarket,
 } from "@/lib/molfi-backend";
 import { cn } from "@/lib/utils";
 
-const fmt = (n: number) =>
-  n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/**
+ * Format an FXRP amount.
+ *
+ * Two decimals is wrong for this asset: FXRP carries 6 (XRP drops), and a real
+ * escrowed stake of 0.001 renders as "0.00" — the position looks empty when it
+ * is not. Show more precision only when the number actually needs it, so
+ * ordinary amounts stay readable.
+ */
+const fmt = (n: number) => {
+  const abs = Math.abs(n);
+  const digits = abs > 0 && abs < 0.01 ? 6 : 2;
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: digits,
+  });
+};
 const signed = (n: number) => `${n >= 0 ? "+" : ""}${fmt(n)}`;
 const pnlClass = (n: number) =>
   n > 0 ? "text-[var(--long-text)]" : n < 0 ? "text-[var(--short-text)]" : "text-muted-foreground";
@@ -73,11 +88,43 @@ function Stat({
 }
 
 export function MolfiPortfolio({ address }: { address: string }) {
-  const { data: positions = [], isLoading } = useQuery({
+  const { data: backendPositions = [], isLoading } = useQuery({
     queryKey: ["molfi-positions", address],
     queryFn: () => fetchPositions(address),
     refetchInterval: 15_000,
   });
+  // Bets placed directly on-chain (wallet → PredictEscrow) never touch the
+  // backend's log, so the portfolio has to read the escrow too — otherwise a
+  // real, escrowed stake shows as "No trades yet".
+  const { data: chainPositions = [] } = useQuery({
+    queryKey: ["molfi-onchain-positions", address],
+    queryFn: () => fetchOnChainPositionsForWallet(address),
+    refetchInterval: 15_000,
+  });
+
+  const positions = useMemo<BackendPosition[]>(() => {
+    const seen = new Set(backendPositions.map((p) => `${p.marketId}:${p.side}`));
+    const fromChain = chainPositions
+      .filter((p) => !seen.has(`${p.marketId}:${p.side}`))
+      .map<BackendPosition>((p) => ({
+        _id: `onchain:${p.marketId}:${p.side}`,
+        marketId: p.marketId,
+        symbol: p.symbol,
+        question: p.question,
+        address,
+        side: p.side,
+        amount: p.amount,
+        // Entry price is not recorded on-chain. Leaving it 0 makes the P&L
+        // math fall back to "value = stake" rather than inventing a basis.
+        entryPrice: 0,
+        status: p.status,
+        won: p.won ?? undefined,
+        payout: p.payout,
+        createdAt: p.closeTs,
+        settledAt: p.resolved ? p.closeTs : undefined,
+      }));
+    return [...backendPositions, ...fromChain];
+  }, [backendPositions, chainPositions, address]);
   const { data: openMarkets = [] } = useQuery({
     queryKey: ["molfi-backend-markets", "open"],
     queryFn: () => fetchBackendMarkets("open"),

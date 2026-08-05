@@ -390,6 +390,34 @@ export interface OnChainTrade {
   txHash: string | null;
 }
 
+/**
+ * A position read straight from PredictEscrow — the authoritative record of
+ * what a wallet has staked. Backend-recorded bets (BackendPosition) are a
+ * separate, off-chain convenience log; a wallet that bets directly on-chain
+ * only appears here.
+ */
+export interface OnChainPosition {
+  marketId: string;
+  symbol: string;
+  question: string;
+  side: "yes" | "no";
+  amount: number;
+  closeTs: number;
+  status: "open" | "settled";
+  resolved: boolean;
+  won: boolean | null;
+  payout: number;
+  strike: number | null;
+}
+
+export async function fetchOnChainPositionsForWallet(
+  address: string,
+): Promise<OnChainPosition[]> {
+  const r = await fetch(`${BASE}/api/onchain/positions/${encodeURIComponent(address)}`);
+  if (!r.ok) return [];
+  return r.json();
+}
+
 /** A wallet's real on-chain bets/redeems (with tx hashes), optionally per market. */
 export async function fetchOnChainPositions(
   address: string,

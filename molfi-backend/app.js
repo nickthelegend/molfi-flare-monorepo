@@ -22,6 +22,13 @@ const icon = (s) =>
   `https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/${String(s).toLowerCase()}.png`;
 
 const r2 = (n) => Math.round(n * 100) / 100;
+/**
+ * Round to FXRP precision (6 dp).
+ *
+ * `r2` is fine for USD-scale numbers but destroys FXRP amounts: a 0.001 FXRP
+ * stake rounds to 0 and the position reads as empty.
+ */
+const r6 = (n) => Math.round(Number(n) * 1e6) / 1e6;
 
 /** Implied YES probability for a price market (spot vs strike + time decay). */
 function impliedYes(px, strike, closeTs, createdAt) {
@@ -110,6 +117,11 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
     const p = 1 / (1 + Math.exp(-edge * k * (0.4 + 0.6 * (1 - remaining))));
     return Math.min(0.99, Math.max(0.01, p));
   }
+  /** FTSO feed id -> symbol, for labelling markets read straight from chain. */
+  const FEED_SYMBOL = Object.fromEntries(
+    Object.entries(chain.FEEDS).map(([sym, feed]) => [String(feed).toLowerCase(), sym]),
+  );
+
   const decorate = (m) => ({
     ...m,
     yesPrice: m.status === "resolved" ? (m.outcome === "yes" ? 1 : 0) : impliedYesMkt(m, lastPrice[m.symbol]),
@@ -478,21 +490,62 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
 
   // A wallet's real on-chain bets/redeems (indexed to Mongo, with tx hashes).
   app.get("/api/onchain/positions/:address", async (req, res) => {
+    // Read positions straight from PredictEscrow rather than from an index.
+    //
+    // This previously served the `onchainTrades` collection, which nothing in
+    // this repo ever writes — so a user who bet on-chain saw "No trades yet"
+    // even though their stake was escrowed and visible on the market page. The
+    // chain is the source of truth; ask it.
     try {
-      const q = { address: req.params.address };
-      if (req.query.market) q.market = req.query.market;
-      const rows = await OnchainTrades.find(q).sort({ ts: -1 }).limit(50).toArray();
-      res.json(
-        rows.map((r) => ({
-          kind: r.kind,
-          market: r.market,
-          outcome: r.outcome ?? null,
-          amount: r.amount,
-          ts: r.ts,
-          txHash: r.txHash || null,
-        })),
-      );
-    } catch {
+      const address = req.params.address;
+      const ids = req.query.market
+        ? [req.query.market]
+        : await chain.listMarketIds();
+
+      const rows = (
+        await Promise.all(
+          ids.map(async (id) => {
+            const [yes, no] = await Promise.all([
+              chain.escrowPosition(id, 0, address).catch(() => 0),
+              chain.escrowPosition(id, 1, address).catch(() => 0),
+            ]);
+            if (!yes && !no) return null;
+
+            const mk = await chain.getMarketFull(id).catch(() => null);
+            if (!mk) return null;
+            const resolved = mk.status === 2;
+            const side = yes > 0 ? "yes" : "no";
+            const amount = yes > 0 ? yes : no;
+            const won = resolved ? (mk.outcome === 0) === (side === "yes") : null;
+
+            // Payout is pro-rata over the whole pot, so it is only meaningful
+            // against the live pools — compute it rather than storing a guess.
+            const pools = await chain.escrowPools(id).catch(() => ({ yes: 0, no: 0, total: 0 }));
+            const winPool = side === "yes" ? pools.yes : pools.no;
+            const gross = winPool > 0 ? (amount * pools.total) / winPool : 0;
+            const payout = r6(gross * 0.98);
+
+            return {
+              marketId: id,
+              symbol: mk.feedId ? FEED_SYMBOL[String(mk.feedId).toLowerCase()] ?? "" : "",
+              question: mk.question,
+              side,
+              amount: r6(amount),
+              closeTs: mk.closeTs * 1000,
+              status: resolved ? "settled" : "open",
+              resolved,
+              won,
+              payout: resolved ? (won ? payout : 0) : payout,
+              strike: mk.strike ?? null,
+            };
+          }),
+        )
+      ).filter(Boolean);
+
+      rows.sort((a, b) => b.closeTs - a.closeTs);
+      res.json(rows);
+    } catch (e) {
+      console.warn(`[onchain/positions] ${e.message}`);
       res.json([]);
     }
   });
