@@ -1,0 +1,24 @@
+{
+  "network": "coston2",
+  "chainId": 114,
+  "rpc": "https://coston2-api.flare.network/ext/C/rpc",
+  "explorer": "https://coston2-explorer.flare.network",
+  "deployedAt": "2026-08-05T20:31:04.025Z",
+  "deployer": "0x2904Ea643BaBDd278daBB817045fA463f3388Feb",
+  "fxrp": "0x0b6A3645c240605887a5532109323A3E12273dc7",
+  "fxrpDecimals": 6,
+  "confDenom": "1000000",
+  "contracts": {
+    "ftsoOracle": "0xDaeBBa2A3A354E7677f5F005F0fCa0b24b8189B3",
+    "confidentialBetVerifier": "0x7a6995201d02bE66a2394587Dc31E72818ca2365",
+    "molfiMarket": "0x6a9bC905c9ba5976BBaE19A92B6Fc032Ff0233FC",
+    "predictEscrow": "0x220BB958923eF274Fe61C8318559EeC2D5c5492f",
+    "confidentialBet": "0xde2C0105DC046bd428E68d425ad6177507f64BBE"
+  },
+  "feeds": {
+    "XRP/USD": "0x015852502f55534400000000000000000000000000",
+    "FLR/USD": "0x01464c522f55534400000000000000000000000000",
+    "BTC/USD": "0x014254432f55534400000000000000000000000000",
+    "ETH/USD": "0x014554482f55534400000000000000000000000000"
+  }
+}
