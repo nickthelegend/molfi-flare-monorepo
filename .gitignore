@@ -1,0 +1,38 @@
+# deps
+node_modules/
+.pnp
+.pnp.js
+
+# secrets — never commit
+.env
+.env.local
+.env.*.local
+*.key
+deployer.json
+
+# build output
+dist/
+build/
+out/
+cache/
+artifacts/
+typechain-types/
+.next/
+.vercel/
+
+# logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# test / coverage
+coverage/
+.nyc_output/
+
+# os
+.DS_Store
+Thumbs.db
+
+# hardhat
+cache_hardhat/
+ignition/deployments/chain-31337/
