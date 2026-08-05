@@ -301,30 +301,53 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       }
       if (closed) return res.json([]);
       // Fallback: read MolfiMarket on-chain directly (Coston2, read-only).
+      //
+      // Every market is read in PARALLEL. The original did this sequentially,
+      // which on a real RPC meant ~2 round trips per market — 13.7s wall clock
+      // for 16 markets, long enough that the grid sat on "Loading markets…".
       try {
         const ids = await chain.listMarketIds();
-        const rows = [];
-        for (const id of ids) {
-          const mk = await chain.getMarket(id);
-          if (!mk) continue;
-          const closeMs = mk.closeTs * 1000;
-          if (mk.status === 2 || (closeMs && closeMs <= Date.now())) continue; // resolved / past close
-          const pools = await chain.escrowPools(id).catch(() => ({ yes: 0, no: 0 }));
-          rows.push({
-            marketId: id,
-            symbol: "",
-            icon: "",
-            question: mk.question,
-            closeTs: closeMs,
-            oracle: "ftso",
-            resolved: mk.status === 2,
-            strike: null,
-            spot: null,
-            yesPrice: 0.5,
-            oi: r2(pools.yes + pools.no),
-            bets: 0,
-          });
-        }
+
+        // FTSO feed id → symbol, so a market read straight from chain can still
+        // carry its asset (and therefore its icon, spot price and strike).
+        const FEED_SYM = Object.fromEntries(
+          Object.entries(chain.FEEDS).map(([sym, feed]) => [String(feed).toLowerCase(), sym]),
+        );
+
+        const rows = (
+          await Promise.all(
+            ids.map(async (id) => {
+              const mk = await chain.getMarketFull(id).catch(() => null);
+              if (!mk) return null;
+              const closeMs = mk.closeTs * 1000;
+              if (mk.status === 2 || (closeMs && closeMs <= Date.now())) return null; // resolved / past close
+
+              const pools = await chain.escrowPools(id).catch(() => ({ yes: 0, no: 0 }));
+              const symbol = FEED_SYM[String(mk.feedId).toLowerCase()] ?? "";
+              const spot = symbol ? (lastPrice[symbol] ?? null) : null;
+              // Cadence is encoded in the seeded question, e.g. "… (15m)".
+              const cadence = Number(/\((\d+)m\)/.exec(mk.question)?.[1]) || undefined;
+
+              return {
+                marketId: id,
+                symbol,
+                icon: symbol ? icon(symbol) : "",
+                question: mk.question,
+                closeTs: closeMs,
+                cadenceMins: cadence,
+                oracle: "ftso",
+                resolved: false,
+                strike: mk.strike ?? null,
+                spot,
+                yesPrice: impliedYes(spot, mk.strike ?? null, closeMs, Date.now()),
+                oi: r2(pools.yes + pools.no),
+                bets: 0,
+              };
+            }),
+          )
+        ).filter(Boolean);
+
+        rows.sort((a, b) => a.closeTs - b.closeTs);
         return res.json(rows.slice(0, 20));
       } catch (e) {
         // Live on-chain read failed (RPC issue, etc). No index and no live
