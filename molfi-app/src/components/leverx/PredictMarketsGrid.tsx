@@ -17,7 +17,7 @@ import {
 import type { ReactNode } from "react";
 import { AnimatedCompactUsd, AnimatedMarketPremium } from "@/components/ui/animated-numbers";
 import { MarketTradeLink } from "@/components/leverx/MarketTradeLink";
-import type { LeverxMarketRow } from "@/lib/leverx/indexer-markets";
+import { premiumToCents, type LeverxMarketRow } from "@/lib/leverx/indexer-markets";
 import { MarketTitle } from "@/components/leverx/MarketTitle";
 import { ui } from "@/lib/copy";
 import {
@@ -41,7 +41,6 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   markets: LeverxMarketRow[];
-  liquidityLabel?: ReactNode;
   offline?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
@@ -49,7 +48,6 @@ interface Props {
 
 export function PredictMarketsGrid({
   markets,
-  liquidityLabel = "_",
   offline,
   emptyTitle = ui.emptyMarkets,
   emptyDescription = ui.emptyMarketsHint,
@@ -146,7 +144,19 @@ export function PredictMarketsGrid({
                   </MarketTradeLink>
                 </div>
 
-                <SentimentBar yesPct={display.lastAskPremium} compact />
+                {/* SentimentBar takes 0-100. `lastAskPremium` is the RAW 1e9
+                    probability, so passing it straight through clamped every
+                    card to "YES 100% / NO 0%".
+                    `>= 0`, not `> 0`: a market that resolved NO prices YES at
+                    exactly 0, which is a known outcome, not a missing quote. */}
+                <SentimentBar
+                  yesPct={
+                    display.lastAskPremium != null && display.lastAskPremium >= 0
+                      ? premiumToCents(display.lastAskPremium)
+                      : null
+                  }
+                  compact
+                />
 
                 <div className={marketCardActions}>
                   <MarketSideActions market={source} stretch className="w-full" />

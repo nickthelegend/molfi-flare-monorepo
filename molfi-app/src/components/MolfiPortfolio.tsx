@@ -8,9 +8,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import {
   fetchPositions,
   fetchOnChainPositionsForWallet,
+  fetchOnChainMarkets,
   fetchBackendMarkets,
   type BackendPosition,
-  type BackendMarket,
 } from "@/lib/molfi-backend";
 import { cn } from "@/lib/utils";
 
@@ -34,8 +34,14 @@ const signed = (n: number) => `${n >= 0 ? "+" : ""}${fmt(n)}`;
 const pnlClass = (n: number) =>
   n > 0 ? "text-[var(--long-text)]" : n < 0 ? "text-[var(--short-text)]" : "text-muted-foreground";
 
+/** The only market fields the portfolio rows consume. */
+interface MarketMeta {
+  yesPrice: number | null;
+  icon?: string;
+}
+
 interface Row extends BackendPosition {
-  market?: BackendMarket;
+  market?: MarketMeta;
   currentSidePrice: number | null;
   value: number;
   unrealizedPnl: number;
@@ -130,16 +136,29 @@ export function MolfiPortfolio({ address }: { address: string }) {
     queryFn: () => fetchBackendMarkets("open"),
     refetchInterval: 15_000,
   });
+  // On-chain positions carry bytes32 market ids, which never match the
+  // backend's `SYM-15m-strike-ts` _ids. Without this second source the "Now"
+  // column was "—" for every position a user can actually open, since the
+  // markets grid is fed exclusively by on-chain markets.
+  const { data: openChainMarkets = [] } = useQuery({
+    queryKey: ["molfi-onchain-markets", "open"],
+    queryFn: () => fetchOnChainMarkets("open"),
+    refetchInterval: 15_000,
+  });
 
   const marketsById = useMemo(() => {
-    const m = new Map<string, BackendMarket>();
-    for (const mk of openMarkets) m.set(mk._id, mk);
+    const m = new Map<string, MarketMeta>();
+    for (const mk of openMarkets) m.set(mk._id.toLowerCase(), { yesPrice: mk.yesPrice, icon: mk.icon });
+    for (const mk of openChainMarkets)
+      m.set(mk.marketId.toLowerCase(), { yesPrice: mk.yesPrice ?? null, icon: mk.icon });
     return m;
-  }, [openMarkets]);
+  }, [openMarkets, openChainMarkets]);
 
   const rows = useMemo<Row[]>(() => {
     return positions.map((p) => {
-      const market = marketsById.get(p.marketId);
+      // Lowercased on both sides: ids reach this map from two sources whose
+      // hex casing is not guaranteed to agree.
+      const market = marketsById.get(p.marketId.toLowerCase());
       const currentYes = market?.yesPrice ?? null;
       const currentSidePrice =
         currentYes == null ? null : p.side === "yes" ? currentYes : 1 - currentYes;
@@ -266,7 +285,9 @@ export function MolfiPortfolio({ address }: { address: string }) {
             <>
               <td className="px-3 py-2 text-right font-mono">{fmt(r.amount)}</td>
               <td className="px-3 py-2 text-right font-mono text-muted-foreground">
-                {(r.entryPrice * 100).toFixed(0)}¢
+                {/* On-chain positions have no recorded entry price. Rendering
+                    the 0 placeholder as "0¢" reads as a real basis. */}
+                {r.entryPrice > 0 ? `${(r.entryPrice * 100).toFixed(0)}¢` : "—"}
               </td>
               <td className="px-3 py-2 text-right font-mono text-muted-foreground">
                 {r.currentSidePrice != null ? `${(r.currentSidePrice * 100).toFixed(0)}¢` : "—"}

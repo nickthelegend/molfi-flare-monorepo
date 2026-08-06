@@ -29,10 +29,9 @@ function pricePending(
   lastAskPremium: number | null,
   quotePaused: boolean | undefined,
 ): boolean {
+  // A 0 premium is a settled NO, not a pending quote — only null is unknown.
   return Boolean(
-    premiumLoading &&
-      !quotePaused &&
-      (lastAskPremium == null || lastAskPremium <= 0),
+    premiumLoading && !quotePaused && lastAskPremium == null,
   );
 }
 

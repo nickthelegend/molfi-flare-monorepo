@@ -29,13 +29,14 @@ function TermsPage() {
         />
         <article className="space-y-6 text-sm leading-relaxed text-muted-foreground">
           <Clause n="1" title="Using the service">
-            By using {APP_NAME}, you agree to these terms. The app is provided as-is. You are
-            responsible for understanding the risks of leveraged trading on testnet.
+            By using {APP_NAME}, you agree to these terms. The app is provided as-is on Flare
+            Coston2 testnet. You are responsible for understanding the risks of prediction-market
+            trading.
           </Clause>
 
           <Clause n="2" title="Eligibility">
             You confirm you are of legal age in your jurisdiction and that interacting with
-            Sui-based derivatives is not prohibited by applicable law. Residents of restricted
+            on-chain prediction markets is not prohibited by applicable law. Residents of restricted
             jurisdictions must not use this interface.
           </Clause>
 
@@ -46,9 +47,11 @@ function TermsPage() {
           </Clause>
 
           <Clause n="4" title="Protocol risks">
-            Smart contract risk, oracle deviation, flash-loan reversion, and exchange settlement
-            risk all apply. The {APP_NAME} interface does not custody funds — all positions settle
-            directly through DeepBook Predict smart contracts on Sui.
+            Smart contract risk, FTSOv2 oracle deviation, and FAssets collateral risk all apply.
+            The {APP_NAME} interface does not custody funds — stakes are escrowed by the
+            PredictEscrow contract on Flare Coston2 and settled from the FTSOv2 feed. FXRP is the
+            FAssets representation of XRP, not a USD-pegged stablecoin, so its value moves with
+            XRP.
           </Clause>
 
           <Clause n="5" title="Limitation of liability">

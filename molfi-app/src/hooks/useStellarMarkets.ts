@@ -2,8 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { listMarkets, type OnChainMarket } from "@/lib/stellar/soroban";
 
 /**
- * Live markets read straight from the Molfi `market` Soroban contract on
- * Stellar testnet (enumerate + per-market state via simulation). No indexer.
+ * Live markets read straight from the `MolfiMarket` contract on Flare Coston2
+ * via viem `eth_call` — enumerate `markets()`, then `getMarket()` per id. No
+ * indexer. (The `stellar/` module path is retained for import compatibility
+ * across chain migrations; the chain underneath is Flare's C-Chain.)
  */
 export function useStellarMarkets() {
   return useQuery<OnChainMarket[]>({

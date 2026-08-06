@@ -1,49 +1,67 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import {
-  CHART_OHLCV_INTERVAL,
-  CHART_OHLCV_LOOKBACK_MS,
-  fetchDeepbookOhlcv,
-  ohlcvCandlesToSparklineSeries,
-} from "@/lib/deepbook/ohlcv";
+import { useQueries } from "@tanstack/react-query";
+import { downsampleSeries } from "@/lib/charts/sparkline-path";
+import { fetchBackendPrices } from "@/lib/molfi-backend";
 import type { LeverxMarketRow } from "@/lib/leverx/indexer-markets";
 
-const MARKETS_OHLCV_PAIR = "XBTC_USDC";
-const OHLCV_REFETCH_MS = 60_000;
+const REFETCH_MS = 60_000;
+const MAX_POINTS = 32;
 
-/** Shared XBTC_USDC OHLCV close-price sparkline for market grid/list cards. */
+/**
+ * Per-asset FTSO-fed close-price sparkline for market grid/list cards.
+ *
+ * This used to fetch ONE `XBTC_USDC` series from the Sui mainnet DeepBook
+ * indexer and map it onto every market, so an XRP/USD market on Flare drew a
+ * Bitcoin-on-Sui line and quoted Bitcoin's percentage change as its own. Prices
+ * now come from the same FTSOv2-fed backend series the detail chart uses, keyed
+ * by the market's own asset.
+ *
+ * Queries are deduped by symbol — several markets share one asset, so one query
+ * per market would fan out duplicate requests for the same series.
+ */
 export function useMarketPremiumSparklines(markets: readonly LeverxMarketRow[]) {
-  const query = useQuery({
-    // Same key + fetch as chart OHLCV (`useChartPriceSeries`, `ensureChartOhlcv`);
-    // transform candles → sparkline in useMemo so cache shapes stay aligned.
-    queryKey: ["deepbook-ohlcv", MARKETS_OHLCV_PAIR, CHART_OHLCV_INTERVAL],
-    queryFn: async () => {
-      const endTime = Date.now();
-      const startTime = endTime - CHART_OHLCV_LOOKBACK_MS;
-      return fetchDeepbookOhlcv(
-        MARKETS_OHLCV_PAIR,
-        CHART_OHLCV_INTERVAL,
-        startTime,
-        endTime,
-      );
-    },
-    staleTime: OHLCV_REFETCH_MS / 2,
-    refetchInterval: OHLCV_REFETCH_MS,
-    refetchIntervalInBackground: false,
-    retry: 1,
+  const symbols = useMemo(
+    () => [...new Set(markets.map((m) => (m.asset || "").toUpperCase()).filter(Boolean))],
+    [markets],
+  );
+
+  const results = useQueries({
+    queries: symbols.map((sym) => ({
+      // Same key + fetch as the detail page, so cache shapes stay aligned.
+      queryKey: ["molfi-prices", sym],
+      queryFn: () => fetchBackendPrices(sym, 120),
+      staleTime: REFETCH_MS / 2,
+      refetchInterval: REFETCH_MS,
+      refetchIntervalInBackground: false,
+      retry: 1,
+    })),
   });
 
+  const dataKey = results.map((r) => r.dataUpdatedAt).join(",");
+
   const seriesByMarketId = useMemo(() => {
-    const sparkline = ohlcvCandlesToSparklineSeries(query.data ?? []);
+    const bySymbol = new Map<string, number[]>();
+    symbols.forEach((sym, i) => {
+      const closes = (results[i]?.data ?? [])
+        .map((p) => p.price)
+        .filter((v) => Number.isFinite(v) && v > 0);
+      // Cap at MAX_POINTS so the sparkline geometry matches what the DeepBook
+      // path produced; the consumers size themselves off the point count.
+      bySymbol.set(sym, downsampleSeries(closes, MAX_POINTS));
+    });
+
     const map = new Map<string, number[]>();
     for (const market of markets) {
-      map.set(market.id, sparkline);
+      // An asset with no backend history yields [] — consumers already gate on
+      // `series.length >= 2`, so it degrades to no sparkline rather than a wrong one.
+      map.set(market.id, bySymbol.get((market.asset || "").toUpperCase()) ?? []);
     }
     return map;
-  }, [markets, query.data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markets, symbols, dataKey]);
 
   return {
     seriesByMarketId,
-    isLoading: query.isLoading,
+    isLoading: results.some((r) => r.isLoading),
   };
 }

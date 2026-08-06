@@ -29,21 +29,24 @@ function PrivacyPage() {
         />
         <article className="space-y-6 text-sm leading-relaxed text-muted-foreground">
           <Clause n="1" title="What we collect">
-            We don&apos;t ask for your name or email directly. When you log in with Google via
-            Enoki, we only use your on-chain address to show your trades and prepare transactions
-            you approve yourself.
+            We don&apos;t ask for your name or email. {APP_NAME} only ever sees the address of
+            the wallet you connect, and uses it to show your positions and prepare transactions you
+            approve yourself.
           </Clause>
           <Clause n="2" title="Analytics">
             Anonymous, aggregated usage metrics (page views, transaction success rate) may be
             collected to improve the interface. No wallet addresses are linked to analytics events.
           </Clause>
           <Clause n="3" title="On-chain data">
-            All position and settlement data is public on the Sui ledger. {APP_NAME} reads
-            but does not store this data off-chain beyond ephemeral caching.
+            All stakes and settlements are public on Flare Coston2 — a pari-mutuel position is
+            visible on-chain by design. {APP_NAME} reads but does not store this data off-chain
+            beyond ephemeral caching. Confidential bets are the exception: the side you back is
+            committed as a hash and proved in zero knowledge, so it never appears on-chain.
           </Clause>
           <Clause n="4" title="Cookies & local storage">
-            Local storage is used only to remember UI preferences and your last login session. No
-            third-party tracking cookies are set.
+            Local storage is used to remember UI preferences and to hold your confidential-bet
+            notes — those notes are the ONLY way to claim a hidden-side win, are never sent to a
+            server, and are lost if you clear site data. No third-party tracking cookies are set.
           </Clause>
           <Clause n="5" title="Your rights">
             Because we do not collect personal data, no deletion or data-export request is required.

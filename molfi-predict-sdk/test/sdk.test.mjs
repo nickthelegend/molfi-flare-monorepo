@@ -16,7 +16,33 @@ import {
   canonicalOrderBytes,
   signClobOrder,
   PrivateKeyOrderSigner,
+  MolfiChain,
 } from "../dist/index.js";
+
+/**
+ * A MolfiChain whose viem clients are stubs, so the write path can be asserted
+ * without a network. `wallet`/`pub` are TS-private, which is compile-time only —
+ * at runtime they are ordinary properties.
+ */
+function stubbedChain({ closeTs = BigInt(Math.floor(Date.now() / 1000) + 3600) } = {}) {
+  const chain = new MolfiChain({ privateKey: generateWallet().privateKey });
+  const sent = [];
+  chain.wallet = {
+    writeContract: async (req) => {
+      sent.push(req);
+      return "0x" + "ab".repeat(32);
+    },
+  };
+  chain.pub = {
+    waitForTransactionReceipt: async () => ({ status: "success" }),
+    readContract: async ({ functionName }) => {
+      if (functionName === "allowance") return 2n ** 256n - 1n; // already approved
+      if (functionName === "getMarket") return ["q", closeTs, 0, 0];
+      throw new Error(`unexpected read: ${functionName}`);
+    },
+  };
+  return { chain, sent };
+}
 
 test("config: TESTNET points at Coston2 with 6-decimal FXRP", () => {
   assert.equal(TESTNET.chainId, 114);
@@ -37,6 +63,39 @@ test("config: explicit gas limits are set for the calls Coston2 under-estimates"
   // resulting out-of-gas revert has empty data and looks like a rejection.
   assert.ok(TESTNET.gas.fxrp > 151_388n);
   assert.ok(TESTNET.gas.tx >= TESTNET.gas.fxrp);
+});
+
+test("chain: the configured gas limit actually reaches the write request", async () => {
+  // Asserting the constant exists is not enough — it was exported, documented
+  // and asserted for the whole port while `send()` never passed it, so every
+  // write still went through Coston2's under-reporting estimateGas.
+  const { chain, sent } = stubbedChain();
+  await chain.bet("0x" + "11".repeat(32), OUTCOME_YES, 10);
+  assert.equal(sent.at(-1).functionName, "bet");
+  assert.equal(sent.at(-1).gas, TESTNET.gas.fxrp);
+
+  await chain.resolveFromOracle("0x" + "11".repeat(32));
+  assert.equal(sent.at(-1).functionName, "resolveFromOracle");
+  assert.equal(sent.at(-1).gas, TESTNET.gas.tx);
+});
+
+test("chain: a reverted receipt is reported as failure, not a success hash", async () => {
+  const { chain } = stubbedChain();
+  chain.pub.waitForTransactionReceipt = async () => ({ status: "reverted" });
+  await assert.rejects(
+    () => chain.bet("0x" + "11".repeat(32), OUTCOME_YES, 10),
+    /reverted on-chain \(bet\)/,
+  );
+});
+
+test("chain: refuses a stake on a market that has already closed", async () => {
+  // The settlement price is public from close onward and resolution is
+  // permissionless, so a late stake is a risk-free claim on the pot.
+  const { chain } = stubbedChain({ closeTs: BigInt(Math.floor(Date.now() / 1000) - 60) });
+  await assert.rejects(
+    () => chain.bet("0x" + "11".repeat(32), OUTCOME_YES, 10),
+    /closed 6[01]s ago/,
+  );
 });
 
 test("outcome constants", () => {

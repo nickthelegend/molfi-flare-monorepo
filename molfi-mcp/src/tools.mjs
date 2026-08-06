@@ -95,7 +95,17 @@ export async function getWallet() {
 
 /** The agent's escrowed position on a market. */
 export async function getPosition({ marketId, address }) {
-  const who = getAddress(address ?? agentAccount()?.address ?? "");
+  // Read-only servers have no agent account, so `address` is the only source.
+  // Falling through to getAddress("") here surfaced viem's `Address "" is
+  // invalid` — a library internal that names neither remedy.
+  const target = address ?? agentAccount()?.address;
+  if (!target) {
+    throw new Error(
+      "no address to read — pass `address`, or set MOLFI_AGENT_KEY to read " +
+        "the agent's own position",
+    );
+  }
+  const who = getAddress(target);
   const [yes, no, redeemed] = await Promise.all([
     publicClient.readContract({ address: getAddress(CONTRACTS.escrow), abi: ESCROW_ABI, functionName: "position", args: [asHex(marketId), 0, who] }),
     publicClient.readContract({ address: getAddress(CONTRACTS.escrow), abi: ESCROW_ABI, functionName: "position", args: [asHex(marketId), 1, who] }),
@@ -140,6 +150,17 @@ export async function placeBet({ marketId, outcome, amount }) {
   const market = await readMarket(marketId);
   if (!market) throw new Error(`market ${marketId} not found`);
   if (market.resolved) throw new Error(`market already resolved (${market.winningOutcome} won)`);
+  // Betting stops at CLOSE, not at resolution. Settlement reads the FTSO price
+  // at close, and resolveFromOracle is permissionless and unscheduled — so in
+  // the gap the outcome is already fixed and readable (molfi_get_market hands
+  // the agent `preview.wouldResolveTo` for this exact market). PredictEscrow
+  // rejects it on-chain; catching it here saves the agent a reverting tx.
+  if (market.closesInSeconds <= 0) {
+    throw new Error(
+      `market closed ${-market.closesInSeconds}s ago and is awaiting settlement — ` +
+        `no new stake accepted. Call molfi_resolve_market to settle it.`,
+    );
+  }
 
   const wallet = walletClient();
   const me = wallet.account.address;

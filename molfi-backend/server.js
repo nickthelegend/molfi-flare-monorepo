@@ -151,14 +151,61 @@ async function main() {
     }
   }
 
+  // ── PredictEscrow log indexer ─────────────────────────────────────────────
+  // The leaderboard, vault fee history and per-market bet counts all aggregate
+  // `onchainTrades`. Nothing used to write it, so all three were permanently
+  // empty however much real betting happened on-chain. This is the writer.
+  //
+  // The cursor is persisted so a restart resumes rather than rescanning, and
+  // each row's `_id` is `txHash:logIndex`, so a replayed range is a no-op.
+  const Cursors = db.collection("cursors");
+  await OnchainTrades.createIndex({ market: 1 });
+  await OnchainTrades.createIndex({ ts: -1 });
+
+  async function indexEscrowLogs() {
+    const cur = await Cursors.findOne({ _id: "escrowLogs" });
+    // No cursor yet: start near the deploy rather than at genesis — Coston2 is
+    // millions of blocks deep and the escrow was deployed today.
+    const envFrom = Number(process.env.ESCROW_FROM_BLOCK) || 0;
+    let start = cur?.nextBlock ?? envFrom;
+    if (!start) {
+      // ~3h of history at Coston2's ~1.8s blocks. The RPC caps getLogs at 30
+      // blocks per call, so a deep backfill is expensive; set ESCROW_FROM_BLOCK
+      // to reach further back.
+      start = Number(await chain.publicClient.getBlockNumber()) - 6_000;
+    }
+    const { rows, nextBlock, caughtUp } = await chain.readEscrowLogs(Math.max(0, start));
+    if (rows.length) {
+      await OnchainTrades.bulkWrite(
+        rows.map((r) => ({
+          updateOne: { filter: { _id: r._id }, update: { $set: r }, upsert: true },
+        })),
+        { ordered: false },
+      );
+      console.log(`[molfi-backend] indexed ${rows.length} escrow event(s)`);
+    }
+    await Cursors.updateOne(
+      { _id: "escrowLogs" },
+      { $set: { nextBlock: Number(nextBlock), caughtUp } },
+      { upsert: true },
+    );
+  }
+
   const app = createApp({ db, chain, zk, lastPrice });
 
   await pollPrices();
   await ensureMarkets();
+  await indexEscrowLogs().catch((e) =>
+    console.warn(`[molfi-backend] escrow indexer: ${e.message}`),
+  );
   await app.locals.reconcileVault();
   setInterval(pollPrices, 10_000);
   setInterval(ensureMarkets, 15_000);
   setInterval(settleDue, 12_000);
+  setInterval(
+    () => indexEscrowLogs().catch((e) => console.warn(`[molfi-backend] escrow indexer: ${e.message}`)),
+    15_000,
+  );
   setInterval(() => app.locals.reconcileVault().catch(() => {}), 20_000);
 
   app.listen(PORT, () => console.log(`[molfi-backend] API on http://localhost:${PORT}`));

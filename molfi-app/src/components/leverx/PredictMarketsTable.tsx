@@ -103,14 +103,12 @@ function SortHeader({
 function MarketMobileCard({
   display,
   source,
-  liquidityLabel,
   premiumSeries,
   premiumLoading,
   now,
 }: {
   display: LeverxMarketRow;
   source: LeverxMarketRow;
-  liquidityLabel: ReactNode;
   premiumSeries: readonly number[];
   premiumLoading?: boolean;
   now: number;
@@ -151,12 +149,6 @@ function MarketMobileCard({
           </dd>
         </div>
         <div>
-          <dt className={marketsTableMobileStatLabel}>Liquidity</dt>
-          <dd className={cn(marketsTableMobileStatValue, "font-mono tabular-nums")}>
-            {liquidityLabel}
-          </dd>
-        </div>
-        <div>
           <dt className={marketsTableMobileStatLabel}>Auto close</dt>
           <dd className={cn(marketsTableMobileStatValue, "text-muted-foreground")}>
             {display.expiry ? formatAutoClose(display.expiry) : "—"}
@@ -173,7 +165,6 @@ interface Props {
   markets: LeverxMarketRow[];
   sort: MarketSortId;
   onSortChange: (sort: MarketSortId) => void;
-  liquidityLabel?: ReactNode;
   offline?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
@@ -183,7 +174,6 @@ export function PredictMarketsTable({
   markets,
   sort,
   onSortChange,
-  liquidityLabel = "_",
   offline,
   emptyTitle = ui.emptyMarkets,
   emptyDescription = ui.emptyMarketsHint,
@@ -238,7 +228,6 @@ export function PredictMarketsTable({
               key={display.id}
               display={display}
               source={source}
-              liquidityLabel={liquidityLabel}
               premiumSeries={seriesByMarketId.get(display.id) ?? []}
               premiumLoading={premiumLoading}
               now={now}
@@ -253,8 +242,10 @@ export function PredictMarketsTable({
             <tr>
               <th className={cn(marketsTh, marketsThMarket)}>Market</th>
               <th className={marketsTh}>
+                {/* Renders MarketPremiumQuote — the YES probability in cents,
+                    not the asset's spot price. */}
                 <SortHeader
-                  label="Asset price"
+                  label="YES odds"
                   active={sortKey === "price"}
                   direction={sortDir}
                   onClick={() => toggleSort("price")}
@@ -266,14 +257,6 @@ export function PredictMarketsTable({
                   active={sortKey === "volume"}
                   direction={sortDir}
                   onClick={() => toggleSort("volume")}
-                />
-              </th>
-              <th className={cn(marketsTh, marketsThHideLg)}>
-                <SortHeader
-                  label="Liquidity"
-                  active={sortKey === "liquidity"}
-                  direction={sortDir}
-                  onClick={() => toggleSort("liquidity")}
                 />
               </th>
               <th className={cn(marketsTh, marketsThHideSm)}>
@@ -324,9 +307,6 @@ export function PredictMarketsTable({
                   </td>
                   <td className={cn(marketsTd, marketsTdMono, marketsTdHideMd)}>
                     <AnimatedCompactUsd value={source.volume > 0 ? source.volume : null} />
-                  </td>
-                  <td className={cn(marketsTd, marketsTdMono, marketsTdHideLg)}>
-                    {liquidityLabel}
                   </td>
                   <td className={cn(marketsTd, marketsTdMuted, marketsTdHideSm)}>
                     {display.expiry ? formatAutoClose(display.expiry) : "—"}

@@ -204,12 +204,14 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
  * app sits on its pending skeletons indefinitely. The data is optional, so the
  * shell must render regardless of whether it arrives.
  */
-export async function loadAppShell(queryClient: QueryClient) {
-  const OPTIONAL_HYDRATION_MS = 2_000;
-  await Promise.allSettled([
-    withTimeout(ensurePredictOracles(queryClient), OPTIONAL_HYDRATION_MS),
-    withTimeout(ensureIndexerProtocol(queryClient), OPTIONAL_HYDRATION_MS),
-  ]);
+export async function loadAppShell(_queryClient: QueryClient) {
+  // Nothing to prefetch. Time-boxing the two dead Sui requests kept the shell
+  // from hanging, but it still cost up to 2s of dead latency on the critical
+  // path of every screen — and `predict-server.testnet.mystenlabs.com` does not
+  // resolve at all. Neither cache has a reachable consumer: the only one is
+  // `useIndexerProtocol()` inside MarketLeverageBadge, which issues its own
+  // non-blocking query and renders null anyway (leverageEnabled === false).
+  return null;
 }
 
 export async function loadMarketsRoute(queryClient: QueryClient) {

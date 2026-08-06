@@ -45,6 +45,11 @@ export function PredictOracleProvider({ children }: { children: ReactNode }) {
     queryFn: () => getPredictOracleRows(predictId),
     staleTime: 300_000,
     retry: 2,
+    // Disabled on Flare: this fetches the Sui DeepBook Predict oracle catalog
+    // from predict-server.testnet.mystenlabs.com, which does not resolve. The
+    // provider stays mounted because usePredictOracles() throws without it —
+    // consumers just see an empty catalog instead of three failing requests.
+    enabled: false,
   });
 
   const oracles = useMemo(() => sortOracleRows(query.data ?? []), [query.data]);

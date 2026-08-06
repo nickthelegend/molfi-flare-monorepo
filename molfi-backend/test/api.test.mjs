@@ -4,6 +4,7 @@
 // the real zk module.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { bootApp, mockChain } from "./helpers.mjs";
 
 let h;
@@ -240,7 +241,14 @@ test("BN254 /api/confidential/prepare-commit returns a well-formed note + commit
   assert.equal(status, 200);
   assert.equal(body.side, "NO");
   assert.equal(body.note.outcome, 1);
-  assert.equal(body.denom, 100);
+  // The denomination must equal the DEPLOYED contract's `denom()`, not a
+  // literal. It was hardcoded to 100 against a contract whose denom is
+  // 1_000_000 base units = 1 FXRP, and the UI printed that 100 verbatim —
+  // promising a 100 FXRP stake for a 1 FXRP escrow.
+  const deployed = JSON.parse(
+    readFileSync(new URL("../../molfi-contracts/deployments/coston2.json", import.meta.url), "utf8"),
+  );
+  assert.equal(body.denom, Number(deployed.confDenom) / 10 ** deployed.fxrpDecimals);
   // note fields are decimal BN254 field elements
   assert.match(body.note.secret, /^\d+$/);
   assert.match(body.note.nullifier, /^\d+$/);
@@ -307,4 +315,54 @@ test("market chat: post a comment + list it back", async () => {
   const list = await h.get("/api/markets/0xfeed/comments");
   assert.equal(list.status, 200);
   assert.ok(list.body.some((c) => c.text === "gm molfi"));
+});
+
+test("GET /api/onchain/markets splits open vs settled and strands neither", async () => {
+  // The Settled tab used to short-circuit to [] because it was served only by
+  // the `onchainMarkets` collection, which nothing writes. Worse, the open path
+  // dropped every past-close market, so a market that had closed but not yet
+  // been resolved appeared in NEITHER tab — most of the book was invisible.
+  const open = "0x" + "01".repeat(32);
+  const pastClose = "0x" + "02".repeat(32); // closed, awaiting resolveFromOracle
+  const settled = "0x" + "03".repeat(32);
+  const now = Math.floor(Date.now() / 1000);
+  const byId = {
+    [open]: { closeTs: now + 600, status: 0, outcome: 0 },
+    [pastClose]: { closeTs: now - 600, status: 0, outcome: 0 },
+    [settled]: { closeTs: now - 1200, status: 2, outcome: 1 },
+  };
+  const local = await bootApp({
+    chain: mockChain({
+      async listMarketIds() { return [open, pastClose, settled]; },
+      async escrowPools() { return { yes: 0.0011, no: 0, total: 0.0011 }; },
+      async getMarketFull(id) {
+        return {
+          question: "Will XRP/USD be >= $1.06? (15m)",
+          feedId: "0x015852502f55534400000000000000000000000000",
+          strike: 1.06, op: 0, exists: true, hasOracle: true,
+          ...byId[id],
+        };
+      },
+    }),
+  });
+
+  const openTab = await local.get("/api/onchain/markets?status=open");
+  const closedTab = await local.get("/api/onchain/markets?status=closed");
+  const ids = (r) => r.body.map((m) => m.marketId).sort();
+
+  assert.deepEqual(ids(openTab), [open]);
+  assert.deepEqual(ids(closedTab), [pastClose, settled].sort());
+
+  // A resolved market prices at its outcome; NO winning => yesPrice 0.
+  const s = closedTab.body.find((m) => m.marketId === settled);
+  assert.equal(s.resolved, true);
+  assert.equal(s.outcome, 1);
+  assert.equal(s.yesPrice, 0);
+
+  // Past close but unresolved is still "closed" for tab purposes, not resolved.
+  const p = closedTab.body.find((m) => m.marketId === pastClose);
+  assert.equal(p.resolved, false);
+
+  // OI keeps FXRP precision — r2 rounded a 0.0011 FXRP pot to 0.
+  assert.equal(openTab.body[0].oi, 0.0011);
 });

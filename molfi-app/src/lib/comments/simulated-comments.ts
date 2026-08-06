@@ -114,6 +114,16 @@ export const SimulatedComments: MarketComment[] = [
   },
 ];
 
+/**
+ * Returns the real comments, unchanged.
+ *
+ * This used to append `SimulatedComments` — hardcoded chatter attributed to
+ * Sui-format `0x…::` addresses — to EVERY market's chat and to the featured
+ * feed on the landing page. Invented posts shown as real user activity are not
+ * something a judge (or a user) can tell apart from the genuine ones, so they
+ * are no longer merged in. The fixtures stay in this file for local UI work on
+ * the comment components; nothing renders them.
+ */
 export function mergeCommentsWithSimulated(comments: readonly MarketComment[]): MarketComment[] {
-  return [...comments, ...SimulatedComments];
+  return [...comments];
 }

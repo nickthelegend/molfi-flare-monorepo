@@ -89,6 +89,18 @@ export const FXRP_DECIMALS = 6;
 export const FXRP_UNIT = 1_000_000;
 export const FXRP_SYMBOL = "FXRP";
 
+/**
+ * ConfidentialBet's fixed stake per note — `denom()` on the deployed contract
+ * (molfi-contracts/deployments/coston2.json `confDenom`).
+ *
+ * The UI used to hardcode 100 / 200 FXRP here, a 100x overstatement of what the
+ * contract actually escrows and pays. Every displayed figure now derives from
+ * these two constants.
+ */
+export const CONF_DENOM_BASE = 1_000_000n;
+export const CONF_DENOM_FXRP = Number(CONF_DENOM_BASE) / FXRP_UNIT;
+export const CONF_PAYOUT_FXRP = CONF_DENOM_FXRP * 2; // PAYOUT_MULT
+
 /** Back-compat aliases used throughout the premium UI. */
 export const MUSDC_DECIMALS = FXRP_DECIMALS;
 export const MUSDC_UNIT = FXRP_UNIT;

@@ -8,9 +8,9 @@
     "build": "hardhat compile",
     "test": "hardhat test",
     "deploy:coston2": "hardhat run scripts/deploy.ts --network coston2",
-    "verify:coston2": "hardhat run scripts/verify.ts --network coston2",
     "seed:coston2": "hardhat run scripts/seed-markets.ts --network coston2",
-    "balance": "hardhat run scripts/balance.ts --network coston2"
+    "check:coston2": "hardhat run scripts/check-flare.ts --network coston2",
+    "e2e:coston2": "hardhat run scripts/e2e-live.ts --network coston2"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.8",

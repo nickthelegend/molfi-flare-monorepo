@@ -2,14 +2,15 @@
  * MolfiAgent — the one-class API for an autonomous trader on Flare Coston2.
  *
  *   const agent = MolfiAgent.create();          // fresh EVM wallet
- *   await agent.onboard();                       // mint FXRP from the faucet
+ *   await agent.onboard({ funderKey });          // fund C2FLR gas + report FXRP
  *   const markets = await agent.markets();       // live order book / odds
  *   await agent.bet(onChainMarketId, 0, 100);    // escrow 100 FXRP on YES
  *   await agent.redeem(onChainMarketId);         // claim winnings after resolution
  *
  * Data (markets, odds, leaderboard, vaults) comes from the Molfi market engine;
- * money movement (faucet, bet, redeem) is real on-chain, signed by the agent's
- * own secp256k1 key via viem.
+ * money movement (bet, redeem) is real on-chain, signed by the agent's own
+ * secp256k1 key via viem. FXRP itself cannot be minted — it is FAssets-wrapped
+ * real XRP — so bankroll comes from https://faucet.flare.network/coston2.
  */
 import { createWalletClient, http, parseEther, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -40,6 +41,14 @@ export interface OnboardResult {
    */
   gasFunded: boolean;
   fxrp: number;
+  /**
+   * Present only when the wallet holds 0 FXRP: how to fund it.
+   *
+   * Reported as data rather than thrown. An unfunded bankroll is the expected
+   * state of a wallet that was created two lines ago, and throwing there would
+   * discard the gas-funding result the caller just paid for.
+   */
+  note?: string;
 }
 
 export class MolfiAgent {
@@ -64,12 +73,16 @@ export class MolfiAgent {
 
   /**
    * Onboard a fresh agent wallet: optionally fund it with C2FLR gas, then
-   * claim test FXRP from the open faucet.
+   * report its FXRP balance.
    *
    * Pass `funderKey` (a funded `0x…` EVM private key) to actually send this
    * wallet gas — WITHOUT it, `onboard()` does NOT fund gas, and this wallet's
    * first on-chain write (bet/redeem/etc.) WILL REVERT unless `address`
    * already holds C2FLR from some other source.
+   *
+   * FXRP cannot be minted: it is the FAssets representation of real XRP, so no
+   * call creates it. A zero balance comes back as `note`, not an exception —
+   * fund it at https://faucet.flare.network/coston2.
    */
   async onboard(opts?: { funderKey?: Hex | string }): Promise<OnboardResult> {
     let gasFunded = false;
@@ -88,8 +101,20 @@ export class MolfiAgent {
       await this.chain.pub.waitForTransactionReceipt({ hash });
       gasFunded = true;
     }
-    await this.chain.faucet();
-    return { address: this.address, gasFunded, fxrp: await this.fxrp() };
+    const fxrp = await this.fxrp();
+    return {
+      address: this.address,
+      gasFunded,
+      fxrp,
+      ...(fxrp === 0
+        ? {
+            note:
+              `0 FXRP — this wallet cannot bet yet. FXRP is FAssets-wrapped real ` +
+              `XRP and has no mint(); fund ${this.address} at ` +
+              `https://faucet.flare.network/coston2, then re-check with agent.fxrp().`,
+          }
+        : {}),
+    };
   }
 
   // ── Market data ──────────────────────────────────────────────────────────

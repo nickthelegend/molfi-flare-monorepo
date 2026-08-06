@@ -268,7 +268,7 @@ export function GuideStorybook() {
               </dl>
             </GuidePanel>
             <GuideCallout variant="tip" title="Verify anything">
-              Each market and settlement lives on Flare — open it on coston2-explorer.io to check the
+              Each market and settlement lives on Flare — open it on coston2-explorer.flare.network to check the
               outcome and payouts for yourself.
             </GuideCallout>
           </GuideChapter>
@@ -361,7 +361,7 @@ export function GuideStorybook() {
               </div>
               <div className="guide-faq-item">
                 <dt>Where can I verify a market?</dt>
-                <dd>Every market and settlement is on Flare — open it on coston2-explorer.io to check.</dd>
+                <dd>Every market and settlement is on Flare — open it on coston2-explorer.flare.network to check.</dd>
               </div>
             </dl>
           </GuideChapter>

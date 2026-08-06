@@ -12,7 +12,7 @@ export const Route = createFileRoute("/_app/guide")({
       { title: pageTitle("How it works") },
       {
         name: "description",
-        content: `${ui.appTagline}. Learn how leveraged Predict trades, limit orders, and pool liquidity work on Sui testnet.`,
+        content: `${ui.appTagline}. Learn how FXRP-collateralized bets, FTSOv2 settlement, and the LP vault work on Flare Coston2.`,
       },
     ],
   }),

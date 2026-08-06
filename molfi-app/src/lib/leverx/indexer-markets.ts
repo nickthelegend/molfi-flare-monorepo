@@ -67,7 +67,9 @@ export function formatPremiumCents(premium: number): string {
 }
 
 export function formatPremiumOrPlaceholder(premium: number | null | undefined): string {
-  if (premium == null || premium <= 0) return "_";
+  // `< 0`, not `<= 0`: a market that resolved NO prices YES at exactly 0. That
+  // is the settled answer, so it renders "0.0¢" — only null means "no quote".
+  if (premium == null || premium < 0) return "_";
   return formatPremiumCents(premium);
 }
 

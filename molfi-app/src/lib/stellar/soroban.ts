@@ -32,6 +32,7 @@ import {
   FLARE,
   MUSDC_UNIT,
   MUSDC_DECIMALS,
+  CONF_DENOM_BASE,
   FAUCET_URL,
   txUrl,
 } from "@/lib/stellar/contracts";
@@ -211,7 +212,7 @@ async function send(
   return hash;
 }
 
-/** Approve `spender` to pull at least `amount` mUSDC from `owner` (idempotent). */
+/** Approve `spender` to pull at least `amount` FXRP from `owner` (idempotent). */
 async function ensureAllowance(owner: string, spender: string, amount: bigint): Promise<void> {
   const current = await read<bigint>(CONTRACTS.fxrp, MUSDC_ABI, "allowance", [getAddress(owner), getAddress(spender)]);
   if (current >= amount) return;
@@ -267,7 +268,7 @@ export async function winningOutcome(idHex: string): Promise<number> {
   return Number(await read<number>(CONTRACTS.market, MARKET_ABI, "winningOutcome", [asHex(idHex)]));
 }
 
-/** Permissionlessly settle an oracle market after close (reads the Chainlink feed). */
+/** Permissionlessly settle an oracle market after close (reads FTSOv2 via FtsoOracle). */
 export async function resolveFromOracle(walletAddress: string, idHex: string): Promise<string> {
   return send(CONTRACTS.market, MARKET_ABI, "resolveFromOracle", [asHex(idHex)], TX_GAS);
 }
@@ -305,10 +306,10 @@ export async function fxrpBalance(addr: string): Promise<bigint> {
 export const musdcBalance = fxrpBalance;
 
 // ---------------------------------------------------------------------------
-// PredictEscrow (real-mUSDC pari-mutuel bet + payout)
+// PredictEscrow (real-FXRP pari-mutuel bet + payout)
 // ---------------------------------------------------------------------------
 
-/** Escrow `amountUsdc` mUSDC on an outcome (0=YES, 1=NO) of an on-chain market. */
+/** Escrow `amountUsdc` FXRP on an outcome (0=YES, 1=NO) of an on-chain market. */
 export async function escrowBet(
   walletAddress: string,
   marketIdHex: string,
@@ -330,18 +331,18 @@ export async function escrowPosition(marketIdHex: string, outcome: number, who: 
   return read<bigint>(CONTRACTS.predictEscrow, ESCROW_ABI, "position", [asHex(marketIdHex), outcome, getAddress(who)]);
 }
 
-/** Total mUSDC (base units) escrowed across both sides of a market. */
+/** Total FXRP (base units) escrowed across both sides of a market. */
 export async function escrowTotal(marketIdHex: string): Promise<bigint> {
   return read<bigint>(CONTRACTS.predictEscrow, ESCROW_ABI, "total", [asHex(marketIdHex)]);
 }
 
-/** Total mUSDC (base units) escrowed on one outcome (the real on-chain pool). */
+/** Total FXRP (base units) escrowed on one outcome (the real on-chain pool). */
 export async function escrowPool(marketIdHex: string, outcome: number): Promise<bigint> {
   return read<bigint>(CONTRACTS.predictEscrow, ESCROW_ABI, "pool", [asHex(marketIdHex), outcome]);
 }
 
 /**
- * Privacy bet: escrow `amountUsdc` mUSDC on `outcome`, gated by a Groth16 proof
+ * Privacy bet: escrow `amountUsdc` FXRP on `outcome`, gated by a Groth16 proof
  * the escrow verifies ON-CHAIN before accepting (its nullifier is burned,
  * single-use). Public signals `[root, nullifierHash, outcome, recipient]`.
  */
@@ -362,7 +363,7 @@ export async function escrowBetZk(
   return send(CONTRACTS.predictEscrow, ESCROW_ABI, "betZk", [asHex(marketIdHex), outcome, amount, a, b, c, pub], TX_GAS);
 }
 
-/** Deposit `amountUsdc` mUSDC into the fee vault (funds the escrow's LP pot). */
+/** Deposit `amountUsdc` FXRP into the fee vault (funds the escrow's LP pot). */
 export async function vaultDepositOnChain(walletAddress: string, amountUsdc: number): Promise<string> {
   const amount = toBase(amountUsdc);
   return send(CONTRACTS.fxrp, MUSDC_ABI, "transfer", [getAddress(CONTRACTS.vault), amount], FXRP_GAS);
@@ -373,13 +374,14 @@ export async function vaultDepositOnChain(walletAddress: string, amountUsdc: num
 // ---------------------------------------------------------------------------
 
 /**
- * Escrow one fixed-denomination (100 mUSDC) commitment note. The `commitment` is
+ * Escrow one fixed-denomination (1 FXRP) commitment note. The `commitment` is
  * a binding hash of an off-chain note (secret, nullifier, chosen side) — nothing
  * on-chain reveals which outcome it backs, and the uniform denom hides the amount.
  */
 export async function confidentialCommit(walletAddress: string, commitmentHex: string): Promise<string> {
-  // ConfidentialBet.commit pulls one denom of mUSDC from the sender.
-  await ensureAllowance(walletAddress, CONTRACTS.confidentialBet, 100n * BigInt(MUSDC_UNIT));
+  // ConfidentialBet.commit pulls exactly one denom of FXRP from the sender.
+  // This approved 100x the denom while the contract only ever pulls one.
+  await ensureAllowance(walletAddress, CONTRACTS.confidentialBet, CONF_DENOM_BASE);
   return send(CONTRACTS.confidentialBet, CBET_ABI, "commit", [bigHex(commitmentHex)], FXRP_GAS);
 }
 
@@ -413,7 +415,7 @@ export async function confidentialClaim(
 
 // ---------------------------------------------------------------------------
 // Legacy clob aliases (retained for import compatibility; escrow is the single
-// settlement contract on Avalanche).
+// settlement contract on Coston2).
 // ---------------------------------------------------------------------------
 
 export const balance = (trader: string): Promise<bigint> => musdcBalance(trader);

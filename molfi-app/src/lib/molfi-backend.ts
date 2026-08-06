@@ -1,11 +1,12 @@
 /**
- * Molfi backend client — the MongoDB-backed market engine (price feed +
- * auto-rolling 30-minute BTC/XLM markets + settlement). See molfi-backend/.
+ * Molfi backend client — the MongoDB-backed market engine (FTSOv2 price feed +
+ * auto-rolling 15/30-minute XRP/FLR/BTC/ETH markets + settlement). See
+ * molfi-backend/. Default port is 4100, matching molfi-backend/.env.example.
  */
 import type { LeverxMarketRow } from "@/lib/leverx/indexer-markets";
 
 const BASE =
-  (import.meta.env.VITE_MOLFI_BACKEND_URL as string | undefined) ?? "http://localhost:4000";
+  (import.meta.env.VITE_MOLFI_BACKEND_URL as string | undefined) ?? "http://localhost:4100";
 
 export interface BackendMarket {
   _id: string;
@@ -198,9 +199,17 @@ export async function vaultDeposit(address: string, amount: number): Promise<voi
   }
 }
 
-/** Backend market ids look like `BTC-60400-1751...` / `XLM-0.177-1751...`. */
+/**
+ * Backend market ids look like `XRP-15m-2.31-1751000000000` —
+ * `${symbol}-${cadence}m-${strike}-${closeTs}` (molfi-backend/server.js).
+ *
+ * The symbol set must track the backend's TOKENS. It used to list the Stellar
+ * build's symbols (SOL/XLM/DOGE/LINK/C2FLR) and omit XRP and FLR — the two
+ * Flare-native feeds, one of which is the whole pitch — so an XRP market detail
+ * page fell through to the "sourced from Polymarket" branch.
+ */
 export function isBackendMarketId(id: string): boolean {
-  return /^(BTC|ETH|SOL|XLM|DOGE|C2FLR|LINK)-/.test(id);
+  return /^(XRP|FLR|BTC|ETH)-\d+m-/.test(id);
 }
 
 /** A market that exists ON-CHAIN (32-byte hex id) and can be bet on via the
@@ -381,15 +390,6 @@ export async function uploadCommentImage(
   );
 }
 
-export interface OnChainTrade {
-  kind: "bet" | "redeem";
-  market: string;
-  outcome: number | null;
-  amount: number;
-  ts: number;
-  txHash: string | null;
-}
-
 /**
  * A position read straight from PredictEscrow — the authoritative record of
  * what a wallet has staked. Backend-recorded bets (BackendPosition) are a
@@ -410,19 +410,19 @@ export interface OnChainPosition {
   strike: number | null;
 }
 
+/**
+ * A wallet's live escrow positions, optionally scoped to one market.
+ *
+ * There used to be a second wrapper over this same endpoint typed as
+ * `OnChainTrade[]` (kind / outcome / txHash). The endpoint has never returned
+ * that shape — it reads PredictEscrow, which has no tx history to give — so its
+ * only consumer filtered on a field that was always undefined and rendered an
+ * empty table after every real bet.
+ */
 export async function fetchOnChainPositionsForWallet(
   address: string,
-): Promise<OnChainPosition[]> {
-  const r = await fetch(`${BASE}/api/onchain/positions/${encodeURIComponent(address)}`);
-  if (!r.ok) return [];
-  return r.json();
-}
-
-/** A wallet's real on-chain bets/redeems (with tx hashes), optionally per market. */
-export async function fetchOnChainPositions(
-  address: string,
   market?: string,
-): Promise<OnChainTrade[]> {
+): Promise<OnChainPosition[]> {
   const qs = market ? `?market=${encodeURIComponent(market)}` : "";
   const r = await fetch(`${BASE}/api/onchain/positions/${encodeURIComponent(address)}${qs}`);
   if (!r.ok) return [];
@@ -457,8 +457,15 @@ const toStrikeRaw = (usd: number | null | undefined): number =>
  * `100 / ((53.7 / 1e9) * 100)` ≈ 18,689,121x — a number so large it reads as a
  * rendering glitch rather than a unit error, which is exactly how it shipped.
  */
+/**
+ * `>= 0`, not `> 0`: a market that resolved NO prices YES at exactly 0.
+ *
+ * That is a KNOWN outcome, not a missing quote, but mapping it to null made the
+ * settled card render "—" with no sentiment bar — indistinguishable from a
+ * market whose odds failed to load. Only null/NaN mean "unknown".
+ */
 const toPremiumRaw = (probability: number | null | undefined): number | null =>
-  probability != null && Number.isFinite(probability) && probability > 0
+  probability != null && Number.isFinite(probability) && probability >= 0
     ? Math.round(probability * USD_RAW_SCALE)
     : null;
 

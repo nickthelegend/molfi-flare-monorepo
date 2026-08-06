@@ -37,6 +37,7 @@ async function boot() {
   const db = client.db(process.env.MONGODB_DB || "molfi_flare");
   const Prices = db.collection("prices");
   const Markets = db.collection("markets");
+  const Positions = db.collection("positions");
   await Markets.createIndex({ closeTs: 1, status: 1 }).catch(() => {});
 
   const lastPrice = {};
@@ -107,6 +108,30 @@ async function boot() {
     for (const m of due) {
       const settlePrice = lastPrice[m.symbol] ?? m.openPrice;
       const outcome = settlePrice >= m.strike ? "yes" : "no";
+
+      // Settle the POSITIONS FIRST, then flip the market.
+      //
+      // This entry point used to stop at the market update, so every /api/bet
+      // position on the deployed backend stayed `status: "open"` with no payout
+      // forever and the portfolio's settled/P&L rows never populated — a
+      // production-only divergence from server.js that a local reviewer sees
+      // nothing of.
+      //
+      // Order matters: the `{ status: "open" }` market selector is what re-picks
+      // a market on retry. Flipping the market first and crashing before the
+      // positions would orphan them permanently. This way a crash simply
+      // re-runs, and the loop is idempotent since it matches only open ones.
+      const positions = await Positions.find({ marketId: m._id, status: "open" }).toArray();
+      for (const pos of positions) {
+        const won = pos.side === outcome;
+        const entry = pos.side === "yes" ? pos.entryYes : 1 - pos.entryYes;
+        const payout = won && entry > 0 ? pos.amount / entry : 0;
+        await Positions.updateOne(
+          { _id: pos._id },
+          { $set: { status: "settled", won, payout, pnl: payout - pos.amount, settledAt: now } },
+        ).catch(() => {});
+      }
+
       await Markets.updateOne(
         { _id: m._id },
         { $set: { status: "resolved", outcome, settlePrice, resolvedAt: now } },
@@ -122,7 +147,20 @@ async function boot() {
 }
 
 function getReady() {
-  if (!ready) ready = boot();
+  // A REJECTED boot must not be cached. Storing the promise unconditionally
+  // meant one bad cold start — an Atlas cold start, a DNS blip, the 8s
+  // serverSelectionTimeoutMS — poisoned the warm instance for its entire
+  // lifetime: every later request re-awaited the same rejection and returned
+  // "backend boot failed" long after Mongo was healthy again.
+  if (!ready) {
+    const p = boot().catch((e) => {
+      // Identity guard so a late-settling failure can't clobber a newer
+      // in-flight boot.
+      if (ready === p) ready = null;
+      throw e;
+    });
+    ready = p;
+  }
   return ready;
 }
 

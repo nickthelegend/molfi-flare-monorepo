@@ -9,21 +9,21 @@ import {
 
 describe("isBackendMarketId", () => {
   it.each([
-    "BTC-60400-1751000000",
-    "ETH-3200-1751000000",
-    "SOL-140-1751000000",
-    "XLM-0.177-1751000000",
-    "DOGE-0.12-1751000000",
-    "C2FLR-25-1751000000",
-    "LINK-14-1751000000",
+    "XRP-15m-2.31-1751000000000",
+    "FLR-30m-0.0215-1751000000000",
+    "BTC-15m-60500-1751000000000",
+    "ETH-30m-3200-1751000000000",
   ])("accepts a well-formed backend market id: %s", (id) => {
     expect(isBackendMarketId(id)).toBe(true);
   });
 
   it.each([
     "0xabc123deadbeef", // on-chain hex id
-    "btc-60400-1751000000", // lowercase symbol not recognized
-    "FOO-1-1751000000", // unknown symbol prefix
+    "xrp-15m-2.31-1751000000000", // lowercase symbol not recognized
+    "FOO-15m-1-1751000000000", // unknown symbol prefix
+    "SOL-15m-140-1751000000000", // Stellar-era symbol the backend never mints
+    "XLM-15m-0.177-1751000000000", // ditto
+    "BTC-60400-1751000000", // no cadence segment — pre-Flare id shape
     "", // empty
     "60400-BTC-1751000000", // wrong order
   ])("rejects a non-backend id: %s", (id) => {
@@ -59,9 +59,11 @@ describe("onChainMarketToRow", () => {
     expect(row.onchainStatus).toBe(2);
   });
 
-  it("converts yesPrice to a 0-100 premium, and passes through null", () => {
+  it("converts yesPrice to a 1e9-scaled probability, and passes through null", () => {
     const withPrice = onChainMarketToRow(baseOnChainMarket({ yesPrice: 0.63 }));
-    expect(withPrice.lastAskPremium).toBeCloseTo(63, 10);
+    // Raw 1e9 scale, NOT 0-100 cents — the grid divides by 1e9. Reverting
+    // toPremiumRaw to `yesPrice * 100` reintroduces a ~18,689,121x payout bug.
+    expect(withPrice.lastAskPremium).toBe(630_000_000);
 
     const withoutPrice = onChainMarketToRow(baseOnChainMarket({ yesPrice: undefined }));
     expect(withoutPrice.lastAskPremium).toBeNull();
@@ -127,9 +129,9 @@ describe("backendMarketToRow", () => {
     expect(row.higherStrikeRaw).toBe(0);
   });
 
-  it("converts yesPrice to a 0-100 premium", () => {
+  it("converts yesPrice to a 1e9-scaled probability", () => {
     const row = backendMarketToRow(baseBackendMarket({ yesPrice: 0.72 }));
-    expect(row.lastAskPremium).toBeCloseTo(72, 10);
+    expect(row.lastAskPremium).toBe(720_000_000);
   });
 
   it("defaults volume from oi when present, else 0", () => {

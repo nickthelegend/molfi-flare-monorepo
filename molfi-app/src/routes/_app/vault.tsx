@@ -20,9 +20,15 @@ import { pageSimple, pageSimpleTitle } from "@/lib/leverx/tw";
 import { cn } from "@/lib/utils";
 import { routePendingOptions } from "@/lib/router/route-options";
 
-/** FXRP is the Molfi testnet stand-in for USDC — show the real USDC mark. */
-const USDC_LOGO =
-  "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/usdc.png";
+/**
+ * FXRP is FAssets-wrapped XRP, so it wears the XRP mark.
+ *
+ * This used to render the real USDC logo with alt="USDC" next to the label
+ * "FXRP" — on a page whose whole point is that collateral is XRP-denominated
+ * and NOT a USD peg. An LP reading the icon would price their risk wrong.
+ */
+const FXRP_LOGO =
+  "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/xrp.png";
 
 export const Route = createFileRoute("/_app/vault")({
   ...routePendingOptions,
@@ -161,7 +167,7 @@ function VaultPage() {
         <div className="space-y-3 rounded-xl border border-border bg-card p-5 lg:col-span-1">
           <h2 className="text-sm font-semibold text-foreground">Provide liquidity</h2>
           <div className="flex items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2">
-            <img src={USDC_LOGO} alt="USDC" className="h-7 w-7 rounded-full" loading="lazy" />
+            <img src={FXRP_LOGO} alt="FXRP" className="h-7 w-7 rounded-full" loading="lazy" />
             <div className="leading-tight">
               <p className="text-sm font-semibold text-foreground">FXRP</p>
               {/* FXRP is XRP-backed, not USD-pegged — it is a 1:1
@@ -173,7 +179,7 @@ function VaultPage() {
             <label className="text-xs uppercase tracking-wide text-muted-foreground">Amount (FXRP)</label>
             <div className="relative mt-1">
               <img
-                src={USDC_LOGO}
+                src={FXRP_LOGO}
                 alt=""
                 aria-hidden
                 className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full"
@@ -272,8 +278,11 @@ function VaultPage() {
           <li className="flex gap-3">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
             <span>
-              <strong className="text-foreground">Private by design.</strong> The vault sees only aggregate flow —
-              individual traders&apos; positions are never revealed on-chain (zero-knowledge).
+              {/* Ordinary stakes are public on-chain — only the ConfidentialBet
+                  path hides a side. Claiming blanket privacy here was false. */}
+              <strong className="text-foreground">Optional privacy.</strong> Ordinary bets are public and
+              verifiable on Coston2. Traders who want their side hidden use a confidential bet —
+              a commitment note plus a Groth16 proof — and the vault still earns the same fee.
             </span>
           </li>
         </ul>

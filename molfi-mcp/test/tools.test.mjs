@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import {
   CONTRACTS, FEEDS, FXRP_DECIMALS, GAS, asHex, feedSymbol, fmtFxrp, toFxrp, txUrl,
 } from "../src/chain.mjs";
-import { TOOLS, getPrice, placeBet } from "../src/tools.mjs";
+import { TOOLS, getPrice, placeBet, getPosition } from "../src/tools.mjs";
 
 test("exposes the full agent tool surface", () => {
   assert.deepEqual(Object.keys(TOOLS).sort(), [
@@ -85,4 +85,20 @@ test("place_bet rejects a non-positive amount", async () => {
     () => placeBet({ marketId: "0x" + "11".repeat(32), outcome: "YES", amount: 0 }),
     /amount must be > 0/i,
   );
+});
+
+test("get_position explains itself when read-only and given no address", async () => {
+  // README promises every READ tool still works without MOLFI_AGENT_KEY. This
+  // one used to reach getAddress("") and surface viem's `Address "" is invalid`,
+  // which names neither remedy.
+  const prev = process.env.MOLFI_AGENT_KEY;
+  delete process.env.MOLFI_AGENT_KEY;
+  try {
+    await assert.rejects(
+      () => getPosition({ marketId: "0x" + "11".repeat(32) }),
+      /MOLFI_AGENT_KEY|pass `address`/i,
+    );
+  } finally {
+    if (prev !== undefined) process.env.MOLFI_AGENT_KEY = prev;
+  }
 });

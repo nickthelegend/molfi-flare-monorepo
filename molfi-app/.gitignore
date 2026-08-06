@@ -35,3 +35,6 @@ dist-ssr
 
 .vercel
 .env*
+# …but the example IS the setup doc the README points judges at, so it has to be
+# in the repo. It holds placeholders only, never a real secret.
+!.env.example

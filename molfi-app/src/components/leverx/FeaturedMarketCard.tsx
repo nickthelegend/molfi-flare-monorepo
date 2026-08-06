@@ -184,7 +184,10 @@ export function FeaturedMarketCard({
 /** Crypto featured cards get a live backend price sparkline; others keep the spot chart. */
 function FeaturedLiveChart({ market, strikeUsd }: { market: LeverxMarketRow; strikeUsd: number }) {
   const sym = (market.asset || "").toUpperCase();
-  const isCrypto = ["BTC", "ETH", "SOL", "XLM", "DOGE", "C2FLR", "LINK"].includes(sym);
+  // Molfi's live feeds are XRP, FLR, BTC and ETH. This allow-list was the
+  // Stellar build's symbol set and omitted BOTH Flare-native feeds, so the hero
+  // chart was dead on exactly the markets the product is about.
+  const isCrypto = ["XRP", "FLR", "BTC", "ETH"].includes(sym);
   const { data } = useQuery({
     queryKey: ["featured-prices", sym],
     queryFn: () => fetchBackendPrices(sym, 120),

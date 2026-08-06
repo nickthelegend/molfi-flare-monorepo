@@ -75,6 +75,9 @@ export const coston2Chain = defineChain({
   name: "Flare Testnet Coston2",
   nativeCurrency: { name: "Coston2 Flare", symbol: "C2FLR", decimals: 18 },
   rpcUrls: { default: { http: [COSTON2.rpcUrl] } },
+  // Multicall3 is deployed at the canonical address on Coston2. Registering it
+  // is what lets viem collapse a fan-out of eth_calls into one request.
+  contracts: { multicall3: { address: "0xcA11bde05977b3631167028862bE2a173976CA11" } },
   blockExplorers: {
     default: {
       name: "Coston2 Explorer",
@@ -84,9 +87,22 @@ export const coston2Chain = defineChain({
   testnet: true,
 });
 
+/**
+ * Read client, batched through Multicall3.
+ *
+ * Every market page fans out N markets × 4 reads. Unbatched against the public
+ * Coston2 RPC that measured ~38s for /api/onchain/positions and up to 21s for
+ * /api/onchain/markets — slower than the frontend's own 12-15s poll interval,
+ * so requests piled up faster than they completed.
+ *
+ * `batchSize` is deliberately not left at viem's 1024-byte default: these calls
+ * carry 32-byte market ids and 20-byte addresses, and 1024 still left positions
+ * at ~5s. 4096 brings it under a second.
+ */
 export const publicClient = createPublicClient({
   chain: coston2Chain,
   transport: http(COSTON2.rpcUrl),
+  batch: { multicall: { batchSize: 4096, wait: 24 } },
 });
 
 export const MARKET_ABI = [
@@ -136,6 +152,105 @@ export const ESCROW_ABI = [
     ],
   },
 ];
+
+/**
+ * PredictEscrow events — the only record of who bet what.
+ *
+ * Positions are readable from the contract, but they are a *current* snapshot:
+ * they carry no timestamp, no tx hash, and a redeemed position reads as zero.
+ * The leaderboard, the vault fee history and the per-market bet count all need
+ * the history, so it has to be indexed from logs.
+ */
+export const ESCROW_EVENTS = [
+  {
+    type: "event", name: "Bet",
+    inputs: [
+      { name: "marketId", type: "bytes32", indexed: true },
+      { name: "bettor", type: "address", indexed: true },
+      { name: "outcome", type: "uint32", indexed: false },
+      { name: "amount", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event", name: "Redeem",
+    inputs: [
+      { name: "marketId", type: "bytes32", indexed: true },
+      { name: "bettor", type: "address", indexed: true },
+      { name: "payout", type: "uint256", indexed: false },
+    ],
+  },
+];
+
+/**
+ * Max blocks per `eth_getLogs`.
+ *
+ * The public Coston2 RPC hard-caps this at 30 — "requested too many blocks …
+ * maximum is set to 30". At ~1.8s per block that is ~54s of history per call,
+ * comfortably more than the poll interval, so keeping up costs one request per
+ * tick; only a cold backfill needs many.
+ */
+const LOG_CHUNK = 30n;
+
+/** Requests per invocation, so a cold backfill catches up over several ticks
+ *  instead of firing thousands of calls at the public RPC in one go. */
+const MAX_CHUNKS_PER_CALL = 40;
+
+/**
+ * Read PredictEscrow Bet/Redeem logs starting at `fromBlock`.
+ *
+ * Returns `{ rows, nextBlock, caughtUp }`. `nextBlock` is where to resume — it
+ * is NOT necessarily the head, since the walk stops after MAX_CHUNKS_PER_CALL.
+ * Each row carries a composite `_id` of `txHash:logIndex`, so re-indexing an
+ * overlapping range is idempotent.
+ */
+export async function readEscrowLogs(fromBlock) {
+  const head = await publicClient.getBlockNumber();
+  let from = BigInt(fromBlock);
+  if (from > head) return { rows: [], nextBlock: head + 1n, caughtUp: true };
+
+  const rows = [];
+  let chunks = 0;
+  while (from <= head && chunks < MAX_CHUNKS_PER_CALL) {
+    chunks += 1;
+    const to = from + LOG_CHUNK - 1n > head ? head : from + LOG_CHUNK - 1n;
+    const logs = await publicClient.getLogs({
+      address: getAddress(CONTRACTS.predictEscrow),
+      events: ESCROW_EVENTS,
+      fromBlock: from,
+      toBlock: to,
+    });
+    for (const log of logs) {
+      const kind = log.eventName === "Bet" ? "bet" : "redeem";
+      const raw = kind === "bet" ? log.args.amount : log.args.payout;
+      rows.push({
+        _id: `${log.transactionHash}:${log.logIndex}`,
+        kind,
+        market: log.args.marketId,
+        address: getAddress(log.args.bettor),
+        outcome: kind === "bet" ? Number(log.args.outcome) : null,
+        amount: Number(raw) / U,
+        blockNumber: Number(log.blockNumber),
+        txHash: log.transactionHash,
+      });
+    }
+    from = to + 1n;
+  }
+
+  // Logs carry no timestamp. Fetch it once per distinct block rather than once
+  // per log — a batch of bets usually lands in a handful of blocks.
+  const blocks = [...new Set(rows.map((r) => r.blockNumber))];
+  const times = new Map(
+    await Promise.all(
+      blocks.map(async (n) => {
+        const b = await publicClient.getBlock({ blockNumber: BigInt(n) }).catch(() => null);
+        return [n, b ? Number(b.timestamp) * 1000 : Date.now()];
+      }),
+    ),
+  );
+  for (const r of rows) r.ts = times.get(r.blockNumber) ?? Date.now();
+
+  return { rows, nextBlock: from, caughtUp: from > head };
+}
 
 export const FXRP_ABI = [
   { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 
 const BACKEND_URL =
-  (import.meta.env.VITE_MOLFI_BACKEND_URL as string | undefined) ?? "http://localhost:4000";
+  (import.meta.env.VITE_MOLFI_BACKEND_URL as string | undefined) ?? "http://localhost:4100";
 
 function ServiceStatus({ label, online }: { label: string; online: boolean }) {
   return (

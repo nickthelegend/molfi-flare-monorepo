@@ -21,20 +21,12 @@ import {
 import { AppLogo } from "@/components/AppLogo";
 import { APP_NAME } from "@/lib/brand";
 import { ui } from "@/lib/copy";
-import {
-  LEVERAGE_MAX,
-  LEVERAGE_MIN,
-  MAX_MARGIN_USD,
-  MIN_MARGIN_USD,
-} from "@/lib/leverx/trade-limits";
 import { cn } from "@/lib/utils";
 import { isRangeTradingEnabled } from "@/lib/predict/instruments";
 
 const STORAGE_KEY = "leverx_welcome_dismissed";
 const STEP_COUNT = 4;
 
-const MARGIN_RANGE = `${MIN_MARGIN_USD}–${MAX_MARGIN_USD} dUSDC`;
-const LEVERAGE_RANGE = `${LEVERAGE_MIN}×–${LEVERAGE_MAX}×`;
 const rangeEnabled = isRangeTradingEnabled();
 
 type WelcomeStep = {
@@ -79,19 +71,23 @@ const STEPS: readonly WelcomeStep[] = [
         ],
   },
   {
-    title: "Trade with leverage",
-    description: `Post ${MARGIN_RANGE} margin and choose ${LEVERAGE_RANGE} leverage to size your position.`,
+    // Molfi is pari-mutuel, not leveraged: there is no margin, no dUSDC and no
+    // liquidation. This step used to pitch "1–1000 dUSDC margin at 2×–10×
+    // leverage" — the LeverX product — to every first-time visitor.
+    title: "Pari-mutuel payouts",
+    description:
+      "Stake FXRP on a side. Winners split the whole pot pro-rata, minus a 2% fee — no counterparty, no liquidation.",
     icon: <Zap className="h-5 w-5" aria-hidden />,
     bullets: [
-      "Extra exposure comes from the shared pool",
-      "Charts show when you're ahead or behind",
-      "Close anytime or let contracts settle at expiry",
+      "Your payout scales with the final pot, not a fixed quote",
+      "Odds move as the two sides fill — the card shows the live split",
+      "Nothing to close: the contract settles you at expiry",
     ],
   },
   {
     title: "Trade or earn",
     description:
-      "Connect an Flare wallet to open positions, or deposit FXRP to the LP vault and earn from trading fees.",
+      "Connect a Flare wallet to open positions, or deposit FXRP to the LP vault and earn from trading fees.",
     icon: <Coins className="h-5 w-5" aria-hidden />,
     bullets: [
       "Browse live markets and open your first trade",

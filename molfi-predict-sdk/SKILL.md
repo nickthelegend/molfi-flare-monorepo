@@ -34,8 +34,10 @@ on-chain.
 3. **Commit** — `approve(FXRP)` then `ConfidentialBet.commit(commitment)` to
    escrow the fixed denom. The side is not on-chain.
 4. **Resolve** — after close, anyone calls `MolfiMarket.resolveFromOracle(id)`;
-   it reads the FTSOv2 feed (`latestRoundData`, freshness-checked) and sets the
-   winner.
+   it reads the FTSOv2 feed by its `bytes21` id (`getFeedByIdInWei`, normalized
+   to 18 decimals and freshness-checked) and sets the winner. There is no
+   `latestRoundData` here — that is Chainlink's per-pair aggregator interface;
+   Flare's FTSO is one contract serving every feed, keyed by id.
 5. **Claim** — `ConfidentialBet.claim(id, a, b, c, root, nullifierHash, you)`.
    The contract injects the resolved winner as a public input, so a losing note
    can't prove. The nullifier is burned; you're paid, unlinkable to your bet.
@@ -49,7 +51,13 @@ OPERATOR_KEY=0x<funded Coston2 key> npm run agent:demo
 `demo/agent-confidential-bet.mjs` is a complete, self-contained agent that does
 all five steps live on Coston2 and prints the Coston2 explorer transactions. It uses only
 `viem` + `snarkjs` and the built circuit artifacts in
-`molfi-circuits/build/confidential_bet/`.
+`molfi-circuits/build/confidential_bet/`. Addresses come from
+`molfi-contracts/deployments/coston2.json`, so a redeploy can't strand it.
+
+`OPERATOR_KEY` must be the `ConfidentialBet` admin (it checkpoints the Poseidon
+root for the market) and hold at least 3 FXRP — 1 to bankroll the agent and 2 to
+cover the 2× payout, since the pool holds only the single committed note. The
+demo checks this up front and exits with the faucet URL rather than reverting.
 
 ## Contracts (Coston2 · chainId 114)
 - `MolfiMarket` `0xD709773A1128c1160b292F505FAA8E3e8d0786fF` — FTSOv2-resolved markets (enumerable)

@@ -85,13 +85,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         name: "description",
         content:
-          "Trade price predictions with dUSDC margin at up to 10× leverage on the LeverX demo.",
+          "XRP-settled prediction markets on Flare. Stake FXRP on where crypto prices finish, settled on-chain by the FTSOv2 oracle — with zero-knowledge hidden-side bets.",
       },
       { property: "og:title", content: APP_NAME },
       {
         property: "og:description",
         content:
-          "Trade price predictions with dUSDC margin at up to 10× leverage on the LeverX demo.",
+          "XRP-settled prediction markets on Flare. Stake FXRP on where crypto prices finish, settled on-chain by the FTSOv2 oracle — with zero-knowledge hidden-side bets.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

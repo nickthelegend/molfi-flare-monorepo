@@ -4,7 +4,7 @@
  * without a browser wallet). Reads go through a public client; writes are sent
  * by a wallet client and awaited.
  *
- *   chain.faucet()                        → mint test FXRP
+ *   chain.faucet()                        → rejects; FXRP is bridged XRP, use the faucet
  *   chain.fxrpBalance()                  → read FXRP balance
  *   chain.bet(marketId, YES, 1000)        → escrow real FXRP on an outcome
  *   chain.betZk(...)                      → bet gated by an on-chain Groth16 proof
@@ -55,6 +55,13 @@ const MARKET_ABI = [
   { type: "function", name: "isResolved", stateMutability: "view", inputs: [{ type: "bytes32" }], outputs: [{ type: "bool" }] },
   { type: "function", name: "winningOutcome", stateMutability: "view", inputs: [{ type: "bytes32" }], outputs: [{ type: "uint32" }] },
   { type: "function", name: "resolveFromOracle", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }], outputs: [] },
+  {
+    type: "function", name: "getMarket", stateMutability: "view", inputs: [{ type: "bytes32" }],
+    outputs: [
+      { name: "question", type: "string" }, { name: "closeTs", type: "uint64" },
+      { name: "status", type: "uint8" }, { name: "outcome", type: "uint32" },
+    ],
+  },
 ] as const satisfies Abi;
 
 const ESCROW_ABI = [
@@ -113,7 +120,15 @@ export class MolfiChain {
     })) as T;
   }
 
-  private async send(address: string, abi: Abi, functionName: string, args: readonly unknown[]): Promise<string> {
+  /**
+   * Send a write and wait for it.
+   *
+   * `gas` is not optional in practice — Coston2's `eth_estimateGas` under-reports
+   * FXRP transfers and FTSO-reading writes, and the resulting out-of-gas revert
+   * carries EMPTY revert data, so it looks like a policy rejection rather than a
+   * gas problem. Every call site passes a limit from `config.gas`.
+   */
+  private async send(address: string, abi: Abi, functionName: string, args: readonly unknown[], gas?: bigint): Promise<string> {
     const { account, wallet } = this.requireSigner();
     const hash = await wallet.writeContract({
       address: getAddress(address),
@@ -122,9 +137,41 @@ export class MolfiChain {
       args: args as never,
       account,
       chain: this.chain,
+      ...(gas ? { gas } : {}),
     });
-    await this.pub.waitForTransactionReceipt({ hash });
+    const receipt = await this.pub.waitForTransactionReceipt({ hash });
+    // A reverted tx still returns a hash and a receipt. Without this check the
+    // SDK hands the caller a "successful" hash for a transaction that did
+    // nothing — the single most misleading failure mode there is.
+    if (receipt.status !== "success") {
+      throw new Error(
+        `Transaction reverted on-chain (${functionName}): ${this.config.explorer}/tx/${hash}`,
+      );
+    }
     return hash;
+  }
+
+  /**
+   * Reject a stake on a market that has already closed.
+   *
+   * Settlement reads the FTSO price at close, and that price is public the
+   * instant close passes, while `resolveFromOracle` is permissionless and
+   * unscheduled — so a market can sit closed-but-unresolved indefinitely and a
+   * stake placed in that window is a risk-free claim on the pot. `PredictEscrow`
+   * enforces this on-chain; checking here turns a wasted reverting transaction
+   * into an immediate, explicable error.
+   */
+  private async requireOpen(marketId: string): Promise<void> {
+    const [, closeTs] = await this.read<[string, bigint, number, number]>(
+      this.config.contracts.market, MARKET_ABI, "getMarket", [asHex(marketId)],
+    );
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    if (now >= closeTs) {
+      throw new Error(
+        `market ${marketId} closed ${now - closeTs}s ago — no new stake is accepted ` +
+          `after close. Call resolveFromOracle() to settle it.`,
+      );
+    }
   }
 
   private toBase(amount: number): bigint {
@@ -136,7 +183,7 @@ export class MolfiChain {
     const { account } = this.requireSigner();
     const current = await this.read<bigint>(this.config.contracts.fxrp, MUSDC_ABI, "allowance", [account.address, getAddress(spender)]);
     if (current >= amount) return;
-    await this.send(this.config.contracts.fxrp, MUSDC_ABI, "approve", [getAddress(spender), MAX_UINT]);
+    await this.send(this.config.contracts.fxrp, MUSDC_ABI, "approve", [getAddress(spender), MAX_UINT], this.config.gas.approve);
   }
 
   // ── FXRP ──────────────────────────────────────────────────────────────────
@@ -163,7 +210,7 @@ export class MolfiChain {
     );
   }
 
-  /** FXRP balance in base units (7 decimals). */
+  /** FXRP balance in base units (6 decimals — XRP drops; 1 FXRP = 1_000_000). */
   async fxrpBalance(who?: string): Promise<bigint> {
     const target = getAddress(who ?? this.address ?? "0x0000000000000000000000000000000000000000");
     return this.read<bigint>(this.config.contracts.fxrp, MUSDC_ABI, "balanceOf", [target]);
@@ -174,8 +221,9 @@ export class MolfiChain {
   /** Escrow real FXRP on an outcome (0=YES, 1=NO). `amount` is human FXRP. */
   async bet(marketId: string, outcome: number, amount: number): Promise<string> {
     const amt = this.toBase(amount);
+    await this.requireOpen(marketId);
     await this.ensureAllowance(this.config.contracts.predictEscrow, amt);
-    return this.send(this.config.contracts.predictEscrow, ESCROW_ABI, "bet", [asHex(marketId), outcome, amt]);
+    return this.send(this.config.contracts.predictEscrow, ESCROW_ABI, "bet", [asHex(marketId), outcome, amt], this.config.gas.fxrp);
   }
 
   /**
@@ -191,6 +239,7 @@ export class MolfiChain {
     publicInputs: (string | bigint)[],
   ): Promise<string> {
     const amt = this.toBase(amount);
+    await this.requireOpen(marketId);
     await this.ensureAllowance(this.config.contracts.predictEscrow, amt);
     const a = [BigInt(proof.a[0]), BigInt(proof.a[1])] as const;
     const b = [
@@ -199,13 +248,15 @@ export class MolfiChain {
     ] as const;
     const c = [BigInt(proof.c[0]), BigInt(proof.c[1])] as const;
     const pub = publicInputs.slice(0, 4).map((x) => BigInt(x));
-    return this.send(this.config.contracts.predictEscrow, ESCROW_ABI, "betZk", [asHex(marketId), outcome, amt, a, b, c, pub]);
+    // `tx` (1.5M), not `fxrp` (900k): betZk does an on-chain Groth16 BN254
+    // pairing check and a nullifier write on top of the FXRP transferFrom.
+    return this.send(this.config.contracts.predictEscrow, ESCROW_ABI, "betZk", [asHex(marketId), outcome, amt, a, b, c, pub], this.config.gas.tx);
   }
 
   /** Claim winnings after the market resolves. Returns tx hash. */
   redeem(marketId: string, to?: string): Promise<string> {
     const { account } = this.requireSigner();
-    return this.send(this.config.contracts.predictEscrow, ESCROW_ABI, "redeem", [asHex(marketId), getAddress(to ?? account.address)]);
+    return this.send(this.config.contracts.predictEscrow, ESCROW_ABI, "redeem", [asHex(marketId), getAddress(to ?? account.address)], this.config.gas.fxrp);
   }
 
   async escrowTotal(marketId: string): Promise<bigint> {
@@ -230,7 +281,7 @@ export class MolfiChain {
 
   /** Permissionlessly settle an oracle market after its close time. */
   resolveFromOracle(marketId: string): Promise<string> {
-    return this.send(this.config.contracts.market, MARKET_ABI, "resolveFromOracle", [asHex(marketId)]);
+    return this.send(this.config.contracts.market, MARKET_ABI, "resolveFromOracle", [asHex(marketId)], this.config.gas.tx);
   }
 }
 

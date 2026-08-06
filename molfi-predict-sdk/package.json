@@ -1,7 +1,8 @@
 {
   "name": "@molfi/predict-sdk",
   "version": "0.0.1",
-  "description": "Agent-native SDK for Molfi — confidential prediction markets on Flare (eERC stakes + ZK hidden side + FTSOv2).",
+  "description": "Agent-native SDK for Molfi — FXRP-collateralized prediction markets on Flare Coston2, with ZK hidden-side bets and FTSOv2 settlement.",
+  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -23,8 +24,11 @@
     "agent:demo": "node demo/agent-confidential-bet.mjs"
   },
   "keywords": [
-    "stellar",
-    "soroban",
+    "flare",
+    "coston2",
+    "fxrp",
+    "fassets",
+    "ftsov2",
     "clob",
     "prediction-market",
     "molfi"

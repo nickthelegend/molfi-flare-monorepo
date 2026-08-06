@@ -6,7 +6,6 @@ import { FeaturedMarketCard } from "@/components/leverx/FeaturedMarketCard";
 import { LoadingState } from "@/components/ui/loading-state";
 import { useMarketsUpDisplay } from "@/hooks/useMarketsUpDisplay";
 import type { LeverxMarketRow } from "@/lib/leverx/indexer-markets";
-import { MARKET_TITLE_UP } from "@/lib/leverx/indexer-markets";
 import { MarketTitle } from "@/components/leverx/MarketTitle";
 import { ui } from "@/lib/copy";
 import { cn } from "@/lib/utils";
@@ -101,21 +100,23 @@ export function TopMarketsSwiper({ markets, loading, className }: Props) {
               type="button"
               className="markets-hero-nav-btn"
               onClick={() => swiperRef.current?.slidePrev()}
-              aria-label={prevMarket ? `Previous: ${MARKET_TITLE_UP}` : "Previous market"}
+              aria-label={prevMarket ? `Previous: ${prevMarket.question ?? prevMarket.asset}` : "Previous market"}
             >
               <ChevronLeft className="h-4 w-4 shrink-0" aria-hidden />
               <span className="truncate">
-                {prevMarket ? <MarketTitle /> : "Previous"}
+                {/* `<MarketTitle />` with no props falls back to the LeverX
+                    constant "Bitcoin Up, Down, or Range" — on every market. */}
+                {prevMarket ? <MarketTitle title={prevMarket.question ?? prevMarket.asset} /> : "Previous"}
               </span>
             </button>
             <button
               type="button"
               className="markets-hero-nav-btn"
               onClick={() => swiperRef.current?.slideNext()}
-              aria-label={nextMarket ? `Next: ${MARKET_TITLE_UP}` : "Next market"}
+              aria-label={nextMarket ? `Next: ${nextMarket.question ?? nextMarket.asset}` : "Next market"}
             >
               <span className="truncate">
-                {nextMarket ? <MarketTitle /> : "Next"}
+                {nextMarket ? <MarketTitle title={nextMarket.question ?? nextMarket.asset} /> : "Next"}
               </span>
               <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
             </button>

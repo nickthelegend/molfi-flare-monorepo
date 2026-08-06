@@ -3,11 +3,13 @@
  *
  * Two layers, one package:
  *  • Agent layer (`MolfiAgent`, `MolfiChain`, wallet, data) — generate a
- *    wallet, self-faucet, read live markets/odds, and place REAL on-chain
+ *    wallet, fund its gas, read live markets/odds, and place REAL on-chain
  *    (FXRP-escrowed, optionally ZK-gated) bets. This is what lets an AI agent
  *    trade autonomously. See SKILL.md.
- *  • CLOB layer (`signClobOrder`, `buildOrder`, `MolfiClient`) — canonical
- *    order signing for the off-chain limit order book.
+ *  • CLOB layer (`signClobOrder`, `buildOrder`) — canonical order signing for a
+ *    limit order book. Signing is real and tested; the matching engine and the
+ *    on-chain settlement verifier are NOT built, so nothing consumes these
+ *    orders yet. Treat it as the wire format, not a working exchange.
  */
 
 // ── Agent / on-chain layer ───────────────────────────────────────────────────
@@ -53,63 +55,13 @@ export {
 export type { ClobOrder, SignedClobOrder, OrderSigner } from "./clob.js";
 
 export { buildOrder, canonicalize } from "./order.js";
-export type {
-  Network,
-  Side,
-  Outcome,
-  Order,
-  SignedOrder,
-  SubmitReceipt,
-  Signer,
-} from "./types.js";
+export type { Side, Outcome, Order } from "./types.js";
 
-import { canonicalize, buildOrder } from "./order.js";
-import type {
-  Network,
-  Order,
-  SignedOrder,
-  Signer,
-  SubmitReceipt,
-} from "./types.js";
-
-export interface MolfiClientConfig {
-  apiUrl: string;
-  network: Network;
-}
-
-export class MolfiClient {
-  constructor(private readonly config: MolfiClientConfig) {}
-
-  /** Sign a (built) order with a Stellar signer over its canonical hash. */
-  async signOrder(order: Order, signer: Signer): Promise<SignedOrder> {
-    const maker = order.maker ?? (await signer.publicKey());
-    const full = { ...buildOrder({ ...order, maker }) } as Required<Order>;
-    const payload = new TextEncoder().encode(canonicalize(full));
-    const hash = await sha256Hex(payload);
-    const signature = await signer.sign(payload);
-    return { order: full, hash, signature, signer: maker };
-  }
-
-  /** Submit a signed order to the Molfi matching API. */
-  async submitOrder(signed: SignedOrder): Promise<SubmitReceipt> {
-    const res = await fetch(`${this.config.apiUrl}/v1/orders`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(signed),
-    });
-    if (!res.ok) {
-      return { orderId: "", status: "rejected", reason: `HTTP ${res.status}` };
-    }
-    return (await res.json()) as SubmitReceipt;
-  }
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  // Copy into a fresh ArrayBuffer-backed view so the type is unambiguously
-  // BufferSource (TS 5.7+ distinguishes ArrayBuffer from SharedArrayBuffer).
-  const view = new Uint8Array(bytes);
-  const digest = await crypto.subtle.digest("SHA-256", view.buffer);
-  return Array.from(new Uint8Array(digest), (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
-}
+// `MolfiClient` used to live here. It was fork residue from the Stellar build:
+// it POSTed to `${apiUrl}/v1/orders`, an endpoint that exists nowhere in this
+// repo, and its `signOrder` took a Stellar `Signer` (base64 ed25519 over a
+// pubkey string) while the only implementation the package ships,
+// `PrivateKeyOrderSigner`, is secp256k1 over `Uint8Array`. Passing one to the
+// other produced a `SignedOrder` whose `maker` serialized as `{"0":0,"1":0,…}`.
+// Removed rather than repaired — making it compile would only have made broken
+// code typecheck. Use `signClobOrder` + `PrivateKeyOrderSigner` above.

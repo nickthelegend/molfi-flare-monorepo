@@ -82,7 +82,9 @@ const TOOL_SPECS = [
     name: "molfi_place_bet",
     description:
       "Stake FXRP on YES or NO. Approves exactly this bet's amount, then " +
-      "escrows on-chain. Pari-mutuel: winners split the whole pot minus a 2% fee.",
+      "escrows on-chain. Pari-mutuel: winners split the whole pot minus a 2% fee. " +
+      "Only while the market is still open — stakes are rejected after close, " +
+      "since the settlement price is public from that moment on.",
     inputSchema: {
       type: "object",
       properties: {

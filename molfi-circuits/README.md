@@ -2,14 +2,18 @@
 
 Circom circuits + **BN254** Groth16 tooling for Molfi's zero-knowledge layer.
 Proofs generated here are verified **on-chain** by the Solidity `Groth16Verifier`
-on Avalanche Fuji — see the passing `forge test` in
-[`molfi-contracts`](../molfi-contracts) (real BN254 proof, not a stub).
+on **Flare Coston2** — see the passing Hardhat suite in
+[`molfi-contracts`](../molfi-contracts) (`npm test`, real BN254 proof, not a stub).
 
 > Migrated from the Stellar version's BLS12-381 + Soroban setup. Circom's default
 > field is `bn128` (= BN254) and circomlib's Poseidon is BN254-native, so the EVM
 > port recompiles the same circuits to the curve the EVM precompiles
 > (`0x06`/`0x07`/`0x08`) support. The old BLS12-381 tooling (`scripts/build.sh`,
 > `scripts/to_soroban.mjs`) is kept for reference only.
+>
+> The Avalanche→Flare move needed **no circuit change at all**: Flare's C-Chain
+> exposes the same BN254 precompiles, so the circuits, the proving key, and the
+> exported verifier are byte-identical across both deployments.
 
 ## Circuits
 
@@ -43,9 +47,9 @@ npx snarkjs zkey export soliditycalldata build/confidential_bet/public.json \
   build/confidential_bet/proof.json
 ```
 
-The exported `Groth16Verifier` is deployed on Fuji
-(`0xCA791da6e0e2DB1C5B36Eb297B2d7bE05dc01EBB`) and exercised by
-`molfi-contracts` `forge test` with a real proof.
+The exported `Groth16Verifier` is deployed on Flare Coston2
+(`0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5`) and exercised by the
+`molfi-contracts` Hardhat suite with a real proof.
 
 ## Solidity calldata encoding
 `snarkjs ... soliditycalldata` emits `(uint256[2] a, uint256[2][2] b, uint256[2] c,
@@ -58,4 +62,4 @@ the on-chain verifier — the SDK's `toSol()` / backend `zk.js` handle the swap 
   scripts, and committed fixtures are needed to reproduce. The shared
   `pot_final.ptau` must be **power ≥ 14** for the larger circuits.
 - Legacy BLS12-381 / Soroban byte-encoding tooling (`build.sh`, `to_soroban.mjs`)
-  is retained from the Stellar version and is **not** part of the Avalanche path.
+  is retained from the Stellar version and is **not** part of the Flare path.

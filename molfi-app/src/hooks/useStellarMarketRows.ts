@@ -9,7 +9,7 @@ const isClosed = (r: LeverxMarketRow) => r.onchainStatus === MARKET_STATUS.RESOL
 
 /**
  * Drop-in replacement for `useMergedMarkets`, sourced from the Molfi `market`
- * Soroban contract instead of the Sui indexer. Returns the same shape so the
+ * MolfiMarket contract on Flare Coston2 instead of the Sui indexer. Returns the same shape so the
  * rich LeverX Markets grid/table render unchanged.
  */
 export function useStellarMarketRows(args: {

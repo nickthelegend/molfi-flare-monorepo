@@ -16,11 +16,21 @@ type PresetProps = Omit<ComponentPropsWithoutRef<typeof AnimatedNumber>, "value"
   animate?: boolean;
 };
 
+/**
+ * Compact FXRP amount.
+ *
+ * Molfi's volume/OI figures are FXRP, not dollars. This used to render them as
+ * whole-dollar USD (`$${Math.round(amount)}`), which both mislabelled the asset
+ * — FXRP tracks XRP, it is not a USD peg — and rounded every sub-1-FXRP demo
+ * stake to "$0".
+ */
 function formatCompactUsdValue(amount: number): string {
   const abs = Math.abs(amount);
-  if (abs >= 1_000_000) return `$${(amount / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `$${Math.round(amount / 1_000)}K`;
-  return `$${Math.round(amount)}`;
+  if (abs >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M FXRP`;
+  if (abs >= 1_000) return `${Math.round(amount / 1_000)}K FXRP`;
+  // FXRP carries 6 decimals; keep enough of them that a small stake is visible.
+  if (abs >= 1) return `${amount.toFixed(2)} FXRP`;
+  return `${Number(amount.toFixed(6))} FXRP`;
 }
 
 function levelNotionalUsd(price: number, size: number): number | null {
@@ -37,7 +47,11 @@ function formatLevelNotionalUsd(usd: number): string {
 
 /** Contract premium in raw 1e9 scale → animated ¢ display. */
 export function AnimatedPremium({ value, animate = true, decimals = 1, ...props }: PresetProps) {
-  const cents = value != null && value > 0 ? premiumToCents(value) : null;
+  // `>= 0`, not `> 0`: a market that resolved NO prices YES at exactly 0 — the
+  // settled answer, not a missing quote. Treating it as null rendered the
+  // placeholder, so a resolved-NO card looked identical to one whose odds
+  // failed to load.
+  const cents = value != null && value >= 0 ? premiumToCents(value) : null;
   return (
     <AnimatedNumber
       value={cents}

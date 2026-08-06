@@ -11,7 +11,7 @@
 import { groth16 } from "snarkjs";
 import { randomBytes, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const CIRCUIT_DIR =
@@ -20,8 +20,28 @@ const CIRCUIT_DIR =
 export const WASM = `${CIRCUIT_DIR}/confidential_bet_js/confidential_bet.wasm`;
 export const ZKEY = `${CIRCUIT_DIR}/final.zkey`;
 
-export const CONF_DENOM = 100; // fixed uniform denomination (FXRP) — hides the amount
-export const CONF_PAYOUT = 200; // PAYOUT_MULT(2) × denom on a winning claim
+/**
+ * The fixed uniform stake per confidential note, in whole FXRP.
+ *
+ * Read from the deploy artifact rather than hardcoded. These two numbers are
+ * printed verbatim in the bet ticket, and they were 100/200 against a contract
+ * whose `denom()` is 1_000_000 base units — 1 FXRP at 6 decimals. The UI
+ * promised a 100 FXRP stake and a 200 FXRP payout for a 1 FXRP escrow that pays
+ * 2. Deriving it means a redeploy with a different denom can't reintroduce that.
+ */
+function loadConfDenom() {
+  try {
+    const d = JSON.parse(
+      readFileSync(`${HERE}../molfi-contracts/deployments/coston2.json`, "utf8"),
+    );
+    const base = Number(d.confDenom ?? 1_000_000);
+    return base / 10 ** Number(d.fxrpDecimals ?? 6);
+  } catch {
+    return 1;
+  }
+}
+export const CONF_DENOM = loadConfDenom();
+export const CONF_PAYOUT = CONF_DENOM * 2; // PAYOUT_MULT(2) × denom on a winning claim
 
 /** True if the compiled circuit artifacts are present (proofs can be generated). */
 export function circuitAvailable() {

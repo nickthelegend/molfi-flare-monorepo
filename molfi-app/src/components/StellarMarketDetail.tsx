@@ -18,6 +18,7 @@ import { SentimentBar } from "@/components/leverx/SentimentBar";
 import { LivePriceChart } from "@/components/LivePriceChart";
 import { useNow } from "@/hooks/useNow";
 import { useWallet } from "@/context/WalletContext";
+import { useTradeNavigation } from "@/context/TradeNavigationContext";
 import {
   escrowBet,
   escrowBetZk,
@@ -27,13 +28,20 @@ import {
   confidentialCommit,
   confidentialClaim,
 } from "@/lib/stellar/soroban";
-import { CONTRACTS, FXRP_UNIT, OUTCOME, contractUrl, txUrl } from "@/lib/stellar/contracts";
+import {
+  CONTRACTS,
+  CONF_DENOM_FXRP,
+  CONF_PAYOUT_FXRP,
+  FXRP_UNIT,
+  OUTCOME,
+  contractUrl,
+  txUrl,
+} from "@/lib/stellar/contracts";
 import {
   fetchBackendMarket,
   fetchBackendOrderbook,
   fetchBackendPrices,
   fetchOnChainMarket,
-  fetchOnChainPositions,
   fetchPositions,
   fetchZkProof,
   fetchConfidentialNote,
@@ -202,8 +210,9 @@ function OrderBookPanel({ id }: { id: string }) {
       <div className="flex items-start gap-1.5 border-t border-border px-3 py-2 text-[10px] leading-snug text-muted-foreground">
         <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
         <span>
-          Indicative depth from other traders. Your own position is never revealed on-chain — it&apos;s
-          committed and settled privately with zero-knowledge proofs.
+          Indicative depth from other traders. A normal bet escrows FXRP publicly on-chain —
+          your side and size are visible and verifiable. Only a <strong>confidential</strong> bet
+          hides which side you took, via a commitment note and a Groth16 proof.
         </span>
       </div>
     </div>
@@ -532,21 +541,25 @@ function OnChainPositionsPanel({ id, address }: { id: string; address: string | 
     }),
     refetchInterval: 12_000,
   });
-  const { data: trades = [] } = useQuery({
-    queryKey: ["onchain-positions", id, address],
-    queryFn: () => fetchOnChainPositions(address as string, id),
-    enabled: Boolean(address),
-    refetchInterval: 12_000,
-  });
-
   const yes = pos?.yes ?? 0;
   const no = pos?.no ?? 0;
   const total = (pools?.yes ?? 0) + (pools?.no ?? 0);
-  const estPayout = (outcome: number | null, stake: number) => {
+  const estPayout = (outcome: number, stake: number) => {
     const sidePool = outcome === OUTCOME.NO ? pools?.no ?? 0 : pools?.yes ?? 0;
     return sidePool > 0 ? (stake * total) / sidePool : stake;
   };
-  const bets = trades.filter((t) => t.kind === "bet");
+
+  // Derived from the escrow read above rather than from an endpoint.
+  //
+  // This used to filter a `/api/onchain/positions` response on `t.kind === "bet"`,
+  // a field that response has never carried — so the table was ALWAYS empty and
+  // a real, confirmed FXRP bet showed only "appears here once it's indexed".
+  // Nothing indexes it; the chain already has the answer. Reading it directly
+  // also shows both legs when a wallet holds YES and NO.
+  const legs = [
+    { outcome: OUTCOME.YES as number, amount: yes },
+    { outcome: OUTCOME.NO as number, amount: no },
+  ].filter((b) => b.amount > 0);
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -572,7 +585,7 @@ function OnChainPositionsPanel({ id, address }: { id: string; address: string | 
               FXRP escrowed · pari-mutuel (no fixed shares — your payout scales with the final pot)
             </span>
           </div>
-          {bets.length > 0 ? (
+          {legs.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
@@ -580,52 +593,33 @@ function OnChainPositionsPanel({ id, address }: { id: string; address: string | 
                     <th className="px-3 py-1.5 text-left font-medium">Side</th>
                     <th className="px-3 py-1.5 text-right font-medium">Stake</th>
                     <th className="px-3 py-1.5 text-right font-medium">Est. payout if win</th>
-                    <th className="px-3 py-1.5 text-right font-medium">Tx</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {bets.map((t, i) => (
-                    <tr key={`${t.txHash}-${i}`} className="border-b border-border/60 last:border-0">
+                  {legs.map((b) => (
+                    <tr key={b.outcome} className="border-b border-border/60 last:border-0">
                       <td className="px-3 py-2">
                         <span
                           className={cn(
                             "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase",
-                            t.outcome === OUTCOME.NO
+                            b.outcome === OUTCOME.NO
                               ? "bg-[var(--short-bg)] text-[var(--short-text)]"
                               : "bg-[var(--long-bg)] text-[var(--long-text)]",
                           )}
                         >
-                          {t.outcome === OUTCOME.NO ? "NO" : "YES"}
+                          {b.outcome === OUTCOME.NO ? "NO" : "YES"}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-right font-mono">{t.amount.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono">{b.amount.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right font-mono text-[var(--long-text)]">
-                        {estPayout(t.outcome, t.amount).toFixed(2)}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {t.txHash ? (
-                          <a
-                            href={txUrl(t.txHash)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 font-mono text-accent hover:underline"
-                          >
-                            {t.txHash.slice(0, 6)}…{t.txHash.slice(-4)} <ExternalLink className="h-3 w-3" />
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground">indexing…</span>
-                        )}
+                        {estPayout(b.outcome, b.amount).toFixed(2)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          ) : (
-            <p className="px-4 py-2 text-[11px] text-muted-foreground">
-              Your bet tx appears here once it&apos;s indexed (~15s after confirmation).
-            </p>
-          )}
+          ) : null}
         </>
       )}
     </div>
@@ -706,6 +700,18 @@ function OnChainDetail({ id }: { id: string }) {
   const queryClient = useQueryClient();
   const [side, setSide] = useState<number>(OUTCOME.YES);
   const [amount, setAmount] = useState("100");
+
+  // Honour the side the user clicked on the market card.
+  //
+  // MarketSideActions' YES/NO buttons stash a trade intent and navigate here,
+  // but the only component that consumed it was PredictTradeTerminal, which no
+  // route renders — so clicking "NO" landed on a ticket preselected to YES.
+  const { consumePendingTrade } = useTradeNavigation();
+  useEffect(() => {
+    const pending = consumePendingTrade(id);
+    if (pending?.side === "up") setSide(OUTCOME.YES);
+    else if (pending?.side === "down") setSide(OUTCOME.NO);
+  }, [id, consumePendingTrade]);
   const [placing, setPlacing] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const [confidential, setConfidential] = useState(false);
@@ -733,6 +739,16 @@ function OnChainDetail({ id }: { id: string }) {
     enabled: Boolean(address),
     refetchInterval: 15_000,
   });
+  // Live pools — the payout estimate is pari-mutuel, so it depends on the pot,
+  // not on a quoted price.
+  const poolsQuery = useQuery({
+    queryKey: ["escrow-pools", id],
+    queryFn: async () => ({
+      yes: Number(await escrowPool(id, OUTCOME.YES)) / FXRP_UNIT,
+      no: Number(await escrowPool(id, OUTCOME.NO)) / FXRP_UNIT,
+    }),
+    refetchInterval: 12_000,
+  });
 
   const commentsState = useMarketComments(id);
 
@@ -747,8 +763,9 @@ function OnChainDetail({ id }: { id: string }) {
     setConfNotes(loadConfNotes(id, address));
   }, [id, address]);
 
-  /** Place a confidential bet: escrow a uniform 100 FXRP commitment note whose
-   *  side is hidden on-chain, and stash the note locally to claim after resolution. */
+  /** Place a confidential bet: escrow a uniform {CONF_DENOM_FXRP} FXRP commitment
+   *  note whose side is hidden on-chain, and stash the note locally to claim after
+   *  resolution. */
   const handleConfidentialBet = async () => {
     if (!address) return void connect();
     setConfBusy("commit");
@@ -769,7 +786,11 @@ function OnChainDetail({ id }: { id: string }) {
       showTxSuccess(`🔒 Confidential bet placed · ${prep.denom} FXRP (side hidden)`, hash);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Confidential bet failed";
-      showError(/balance|insufficient/i.test(msg) ? "Need 100 FXRP — use the faucet first." : msg);
+      showError(
+        /balance|insufficient/i.test(msg)
+          ? `Need ${CONF_DENOM_FXRP} FXRP — use the faucet first.`
+          : msg,
+      );
     } finally {
       setConfBusy(null);
     }
@@ -902,7 +923,16 @@ function OnChainDetail({ id }: { id: string }) {
   const remaining = (m.closeTs ?? 0) - now;
   const sidePrice = side === OUTCOME.YES ? yesPrice : 1 - yesPrice;
   const amt = Number(amount) || 0;
-  const payout = sidePrice > 0 ? amt / sidePrice : 0;
+
+  // Pari-mutuel, not fixed-odds. `amt / sidePrice` is what a book that sells you
+  // shares at a quoted price pays; here winners split the WHOLE pot pro-rata and
+  // the contract takes a 2% fee (PredictEscrow.FEE_BPS). Your own stake joins the
+  // pot before the split, so it has to be added to both the pot and your side.
+  const poolYes = poolsQuery.data?.yes ?? 0;
+  const poolNo = poolsQuery.data?.no ?? 0;
+  const sidePool = (side === OUTCOME.YES ? poolYes : poolNo) + amt;
+  const totalPool = poolYes + poolNo + amt;
+  const payout = sidePool > 0 ? (amt * totalPool * 0.98) / sidePool : 0;
   const posYes = posQuery.data?.yes ?? 0;
   const posNo = posQuery.data?.no ?? 0;
   const winLabel = m.outcome === OUTCOME.YES ? "YES" : "NO";
@@ -918,7 +948,9 @@ function OnChainDetail({ id }: { id: string }) {
             <AssetBadge asset={m.symbol} iconUrl={m.icon} size="md" />
             <div className="min-w-0 flex-1">
               <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                ⛓️ On-chain · 🔒 ZK-verified · FTSOv2-settled
+                {/* "ZK" here means the bet's proof is verified on-chain, not
+                    that the position is hidden — a normal stake is public. */}
+                ⛓️ On-chain · 🔒 ZK-gated bets · FTSOv2-settled
               </span>
               <h1 className={tradeTerminalTitle}>{m.question}</h1>
               <Link to="/markets" className={tradeTerminalBack}>
@@ -1052,11 +1084,11 @@ function OnChainDetail({ id }: { id: string }) {
                   <>
                     <div className="flex items-center justify-between rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs">
                       <span className="text-muted-foreground">Stake (uniform · hides amount)</span>
-                      <span className="font-mono font-semibold text-foreground">100 FXRP</span>
+                      <span className="font-mono font-semibold text-foreground">{CONF_DENOM_FXRP} FXRP</span>
                     </div>
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Payout if your side wins</span>
-                      <span className="font-mono text-foreground">200 FXRP</span>
+                      <span className="font-mono text-foreground">{CONF_PAYOUT_FXRP} FXRP</span>
                     </div>
                     <Button
                       onClick={handleConfidentialBet}
@@ -1093,6 +1125,10 @@ function OnChainDetail({ id }: { id: string }) {
                       <span>Est. payout if {side === OUTCOME.YES ? "YES" : "NO"} wins</span>
                       <span className="font-mono text-foreground">{payout.toFixed(2)} FXRP</span>
                     </div>
+                    <p className="text-[10px] leading-snug text-muted-foreground">
+                      Estimate only — pari-mutuel, net of the 2% fee. It moves as the
+                      pools fill, and is final only at close.
+                    </p>
                     <Button onClick={handleBet} disabled={placing} className="w-full gap-1.5" size="lg">
                       {placing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                       {address ? `Bet on-chain · ${side === OUTCOME.YES ? "YES" : "NO"}` : "Connect wallet"}

@@ -1,6 +1,24 @@
 import { premiumToCents, type LeverxMarketRow } from "@/lib/leverx/indexer-markets";
 import { positionKeyFromArgs, marketRowToKey } from "@/lib/leverx/market-keys";
 import { resolveRangeBounds } from "@/lib/leverx/predict-oracle-markets";
+import { FLOAT_SCALING } from "@/lib/predict/constants";
+
+/** Raw premium scale — the same 1e9 convention `premiumToCents` divides by. */
+const PREMIUM_SCALE = Number(FLOAT_SCALING);
+
+/**
+ * The complement of a YES probability, in raw premium units.
+ *
+ * Upstream, the DOWN side got its own on-chain ask from a separate order book.
+ * Molfi is pari-mutuel with no such quote, so spreading `{...row}` left DOWN
+ * carrying the YES premium and the hero card printed the SAME multiplier under
+ * both "UP" and "DOWN" — 1.59x/1.59x on a 63¢ market, where DOWN is really
+ * 100/37 = 2.70x. A degenerate probability (0 or 1, e.g. a resolved market)
+ * returns null so the card renders its "—" rather than an absurd multiplier.
+ */
+function complementPremium(yes: number | null | undefined): number | null {
+  return yes != null && yes > 0 && yes < PREMIUM_SCALE ? PREMIUM_SCALE - yes : null;
+}
 
 export function featuredDownRow(row: LeverxMarketRow): LeverxMarketRow {
   const keyArgs = marketRowToKey({ ...row, isUp: false, isRange: false });
@@ -11,6 +29,7 @@ export function featuredDownRow(row: LeverxMarketRow): LeverxMarketRow {
     id,
     isUp: false,
     isRange: false,
+    lastAskPremium: complementPremium(row.lastAskPremium),
   };
 }
 

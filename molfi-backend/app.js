@@ -101,10 +101,10 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       { $group: { _id: null, fees: { $sum: "$fee" } } },
     ]).toArray();
     const principal = dep?.principal ?? 0;
-    const fees = r2(fee?.fees ?? 0);
+    const fees = r6(fee?.fees ?? 0);
     await Vaults.updateOne(
       { _id: VAULT_ID },
-      { $set: { tvl: r2(principal + fees), feesEarned: fees, depositors: dep?.depositors ?? 0 } },
+      { $set: { tvl: r6(principal + fees), feesEarned: fees, depositors: dep?.depositors ?? 0 } },
       { upsert: true },
     );
   }
@@ -314,12 +314,16 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
         const out = await Promise.all(live.map(enrichOnChainDoc));
         return res.json(out);
       }
-      if (closed) return res.json([]);
-      // Fallback: read MolfiMarket on-chain directly (Coston2, read-only).
+      // Read MolfiMarket on-chain directly (Coston2, read-only).
       //
-      // Every market is read in PARALLEL. The original did this sequentially,
-      // which on a real RPC meant ~2 round trips per market — 13.7s wall clock
-      // for 16 markets, long enough that the grid sat on "Loading markets…".
+      // This serves BOTH tabs. It used to short-circuit `closed` to [] on the
+      // assumption that the Mongo index above would cover settled markets — but
+      // nothing in this repo writes `onchainMarkets`, so the Settled tab was
+      // permanently empty however many markets had actually resolved.
+      //
+      // Every market is read in PARALLEL, and the client batches those reads
+      // through Multicall3 (see chain.js), so this is one RPC round trip rather
+      // than ~4 per market.
       try {
         const ids = await chain.listMarketIds();
 
@@ -335,7 +339,13 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
               const mk = await chain.getMarketFull(id).catch(() => null);
               if (!mk) return null;
               const closeMs = mk.closeTs * 1000;
-              if (mk.status === 2 || (closeMs && closeMs <= Date.now())) return null; // resolved / past close
+              // A market is "closed" once it is past close OR resolved. Keying
+              // only on `status === 2` would strand every past-close market that
+              // nobody has called resolveFromOracle on yet — they'd appear in
+              // neither tab, which is what used to hide most of the book.
+              const resolved = mk.status === 2;
+              const isClosed = resolved || (closeMs > 0 && closeMs <= Date.now());
+              if (isClosed !== closed) return null;
 
               const pools = await chain.escrowPools(id).catch(() => ({ yes: 0, no: 0 }));
               const symbol = FEED_SYM[String(mk.feedId).toLowerCase()] ?? "";
@@ -351,18 +361,25 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
                 closeTs: closeMs,
                 cadenceMins: cadence,
                 oracle: "ftso",
-                resolved: false,
+                resolved,
+                outcome: resolved ? mk.outcome : null,
                 strike: mk.strike ?? null,
                 spot,
-                yesPrice: impliedYes(spot, mk.strike ?? null, closeMs, Date.now()),
-                oi: r2(pools.yes + pools.no),
+                yesPrice: resolved
+                  ? (mk.outcome === 0 ? 1 : 0)
+                  : impliedYes(spot, mk.strike ?? null, closeMs, Date.now()),
+                // r6, not r2: FXRP has 6 decimals, and a 0.0011 FXRP stake
+                // rounded to cents serializes as 0 — every demo bet on this
+                // deployment rendered as "0 volume".
+                oi: r6(pools.yes + pools.no),
                 bets: 0,
               };
             }),
           )
         ).filter(Boolean);
 
-        rows.sort((a, b) => a.closeTs - b.closeTs);
+        // Settled: most recently closed first. Open: soonest to close first.
+        rows.sort((a, b) => (closed ? b.closeTs - a.closeTs : a.closeTs - b.closeTs));
         return res.json(rows.slice(0, 20));
       } catch (e) {
         // Live on-chain read failed (RPC issue, etc). No index and no live
@@ -410,7 +427,7 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
         yesPrice: resolved
           ? mk.outcome === 0 ? 1 : 0
           : impliedYes(spot, mk.strike ?? null, mk.closeTs * 1000, Date.now()),
-        oi: r2(pools.yes + pools.no),
+        oi: r6(pools.yes + pools.no),
         bets: 0,
       });
     } catch (e) {
@@ -491,14 +508,13 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
     }
   });
 
-  // A wallet's real on-chain bets/redeems (indexed to Mongo, with tx hashes).
+  // A wallet's live escrow positions, read straight from PredictEscrow.
   app.get("/api/onchain/positions/:address", async (req, res) => {
-    // Read positions straight from PredictEscrow rather than from an index.
-    //
-    // This previously served the `onchainTrades` collection, which nothing in
-    // this repo ever writes — so a user who bet on-chain saw "No trades yet"
-    // even though their stake was escrowed and visible on the market page. The
-    // chain is the source of truth; ask it.
+    // Deliberately NOT served from the index: this is a current snapshot, and
+    // the chain is the source of truth for "what do I hold right now". It has
+    // no tx hashes, because an escrow read has none to give — the tx history
+    // lives in `onchainTrades` (see the log indexer in server.js) and is what
+    // /api/leaderboard and the vault charts aggregate.
     try {
       const address = req.params.address;
       const ids = req.query.market
@@ -662,8 +678,8 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       .filter((r) => r.trades > 0)
       .map((r) => ({
         address: r._id,
-        volume: r2(r.staked),
-        pnl: r2(r.redeemed - r.staked),
+        volume: r6(r.staked),
+        pnl: r6(r.redeemed - r.staked),
         trades: r.trades,
         wins: r.wins,
         winRate: r.trades > 0 ? Math.round((r.wins / r.trades) * 100) : 0,
@@ -675,8 +691,20 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
   });
 
   // ── Vaults ─────────────────────────────────────────────────────────────────
-  // TVL = FXRP actually held by the escrow (real Coston2 read); principal =
-  // tracked deposits; fees = the excess. Falls back to the Mongo-reconciled doc.
+  // Two DIFFERENT pots, deliberately reported separately:
+  //
+  //   tvl        — the LP pot: tracked deposit principal + accrued fees.
+  //   escrowTvl  — FXRP the escrow currently holds, i.e. bettors' live stakes.
+  //
+  // They used to be conflated: `tvl` was overwritten with the escrow balance and
+  // then divided by LP principal for a share price. With 3 FXRP escrowed and a
+  // 100 FXRP deposit that reported sharePrice 0.03 — telling an LP their share
+  // had collapsed 97% — while the position endpoint simultaneously said they
+  // owned 100% of the vault. The escrow balance can never be LP NAV anyway:
+  // PredictEscrow transfers the 2% fee straight out on redeem.
+  //
+  // HONEST SCOPE: LP deposits are off-chain accounting only (`simulated: true`
+  // on the payload). There is no LP token and no on-chain withdrawal path.
   let vaultCache = { ts: 0, data: null };
   app.get("/api/vaults", async (_req, res) => {
     try {
@@ -686,13 +714,13 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
         { $group: { _id: null, principal: { $sum: "$amount" }, depositors: { $sum: 1 } } },
       ]).toArray();
       const principal = dep?.principal ?? 0;
-      let tvl = principal;
+      // FXRP escrowed across open markets — reported on its own key, never
+      // folded into the LP pot.
+      let escrowTvl = 0;
       try {
-        const assetsUnits = await chain.fxrpBalance(chain.CONTRACTS.predictEscrow);
-        const onchain = Number(assetsUnits) / chain.U;
-        if (onchain > 0) tvl = onchain;
+        escrowTvl = Number(await chain.fxrpBalance(chain.CONTRACTS.predictEscrow)) / chain.U;
       } catch {
-        /* fall back to reconciled principal + fees */
+        /* leave 0 — an RPC blip must not silently change the LP numbers */
       }
       const [feeAgg] = await OnchainTrades.aggregate([
         { $match: { kind: "bet" } },
@@ -701,22 +729,26 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       const [posFee] = await Positions.aggregate([
         { $group: { _id: null, fees: { $sum: "$fee" } } },
       ]).toArray();
-      const fees = Math.max(0, r2((posFee?.fees ?? 0) + (feeAgg ? feeAgg.staked * 0.02 : 0)));
-      if (tvl === principal) tvl = r2(principal + fees);
-      const sharePrice = principal > 0 ? tvl / principal : 1;
-      const lpCount = await VaultDeposits.estimatedDocumentCount();
+      const fees = Math.max(0, r6((posFee?.fees ?? 0) + (feeAgg ? feeAgg.staked * FEE_RATE : 0)));
+      const tvl = r6(principal + fees);
+      // Monotonic in fees and never below 1, which is what "NAV per share since
+      // inception" is supposed to mean.
+      const sharePrice = principal > 0 ? (principal + fees) / principal : 1;
+      const lpCount = dep?.depositors ?? 0;
       const data = [
         {
           _id: VAULT_ID,
           name: "Molfi LP Vault",
           asset: "FXRP",
-          tvl: r2(tvl),
-          feesEarned: r2(fees),
+          tvl,
+          escrowTvl: r6(escrowTvl),
+          feesEarned: r6(fees),
           sharePrice: Math.round(sharePrice * 1e4) / 1e4,
           apr: principal > 0 ? Math.round((fees / principal) * 1000) / 10 : 0,
           depositors: lpCount,
-          feeVolume: r2((feeAgg?.staked || 0) * 0.02),
-          onchain: true,
+          feeVolume: r6((feeAgg?.staked || 0) * FEE_RATE),
+          // LP accounting is off-chain; the escrow figure beside it is real.
+          simulated: true,
         },
       ];
       vaultCache = { ts: Date.now(), data };
@@ -732,8 +764,8 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
     const bets = await OnchainTrades.find({ kind: "bet" }).sort({ ts: 1 }).toArray();
     let fees = 0;
     const pts = bets.map((b) => {
-      fees += b.amount * 0.02;
-      return { ts: b.ts, tvl: r2(fees), fees: r2(fees) };
+      fees += b.amount * FEE_RATE;
+      return { ts: b.ts, tvl: r6(fees), fees: r6(fees) };
     });
     res.json(pts);
   });
@@ -741,7 +773,7 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
   app.get("/api/vaults/activity", async (_req, res) => {
     const bets = await OnchainTrades.find({ kind: "bet" }).sort({ ts: -1 }).limit(12).toArray();
     res.json(
-      bets.map((b) => ({ type: "fee", address: b.address, amount: r2(b.amount * 0.02), symbol: "on-chain bet", ts: b.ts })),
+      bets.map((b) => ({ type: "fee", address: b.address, amount: r6(b.amount * FEE_RATE), symbol: "on-chain bet", ts: b.ts })),
     );
   });
 
@@ -773,10 +805,10 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       const mine = me?.mine ?? 0;
       const all = tot?.all ?? 0;
       res.json({
-        deposited: r2(mine),
+        deposited: r6(mine),
         sharePct: all > 0 ? Math.round((mine / all) * 1000) / 10 : 0,
         earned: 0,
-        shares: r2(mine),
+        shares: r6(mine),
       });
     } catch {
       res.json({ deposited: 0, sharePct: 0, earned: 0 });

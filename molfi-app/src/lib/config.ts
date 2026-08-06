@@ -36,23 +36,30 @@ function viteEnv(name: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-const DEFAULT_INDEXER_DIRECT = "http://localhost:3100";
-const DEFAULT_KEEPER_API = "https://keeper.suileverx.xyz";
-const DEFAULT_INDEXER_PUBLIC = "https://indexer.suileverx.xyz";
+/**
+ * The upstream Sui indexer / keeper hosts are NOT defaulted.
+ *
+ * Molfi settles on Flare and has no leverx-server behind it, but these
+ * resolvers used to fall back to hardcoded hosts — so a production build opened
+ * a persistent WebSocket to `wss://indexer.suileverx.xyz` and issued REST calls
+ * to `keeper.suileverx.xyz`, a live third party serving a different Sui
+ * deployment's ids. Locally it retry-looped forever, painting red WebSocket
+ * errors in the console a judge opens.
+ *
+ * Returning "" makes every downstream `indexerEnabled` / `indexerStreamEnabled`
+ * gate false, so nothing connects. Setting VITE_LEVERX_* still turns it back on
+ * for anyone who actually runs an indexer.
+ */
 
 /** True when REST `/v1/*` is served by the keeper proxy (not leverx-server directly). */
 export function isKeeperApiUrl(url: string): boolean {
   try {
     const { hostname, port } = new URL(url);
     if (port === "3001") return true;
-    return hostname === "keeper.suileverx.xyz" || hostname.startsWith("keeper.");
+    return hostname.startsWith("keeper.");
   } catch {
     return false;
   }
-}
-
-function defaultIndexerDirectUrl(): string {
-  return import.meta.env.PROD ? DEFAULT_INDEXER_PUBLIC : DEFAULT_INDEXER_DIRECT;
 }
 
 function resolveLeverxApiUrl(): string {
@@ -60,7 +67,7 @@ function resolveLeverxApiUrl(): string {
   if (keeper) return keeper;
   const indexer = viteEnv("VITE_LEVERX_INDEXER_URL");
   if (indexer) return indexer;
-  return import.meta.env.PROD ? DEFAULT_KEEPER_API : DEFAULT_INDEXER_DIRECT;
+  return "";
 }
 
 function resolveLeverxWsUrl(apiUrl: string): string | null {
@@ -72,11 +79,11 @@ function resolveLeverxWsUrl(apiUrl: string): string | null {
   if (!apiUrl) return null;
 
   const explicitIndexer = viteEnv("VITE_LEVERX_INDEXER_URL");
-  const wsBase = isKeeperApiUrl(apiUrl)
-    ? explicitIndexer && !isKeeperApiUrl(explicitIndexer)
+  const wsBase =
+    isKeeperApiUrl(apiUrl) && explicitIndexer && !isKeeperApiUrl(explicitIndexer)
       ? explicitIndexer
-      : defaultIndexerDirectUrl()
-    : apiUrl;
+      : apiUrl;
+  if (!wsBase) return null;
 
   return `${wsBase.replace(/^http/i, "ws").replace(/\/$/, "")}/v1/ws`;
 }
@@ -88,7 +95,7 @@ function resolveKeeperApiUrl(leverxApiUrl: string): string {
   const explicit = viteEnv("VITE_LEVERX_KEEPER_URL");
   if (explicit) return explicit.replace(/\/$/, "");
   if (isKeeperApiUrl(leverxApiUrl)) return leverxApiUrl.replace(/\/$/, "");
-  return import.meta.env.PROD ? DEFAULT_KEEPER_API : "http://localhost:3001";
+  return "";
 }
 
 const keeperApiUrl = resolveKeeperApiUrl(leverxApiUrl);
@@ -170,7 +177,9 @@ export const appConfig = {
   leverxIndexerWsUrl,
 
   /** Keeper Jarvis activity WebSocket (Socket.IO namespace `/jarvis`). */
-  jarvisWsUrl: `${keeperApiUrl.replace(/\/$/, "")}/jarvis`,
+  // Guarded: an empty base would otherwise yield the relative URL "/jarvis",
+  // which reads as "configured" downstream.
+  jarvisWsUrl: keeperApiUrl ? `${keeperApiUrl.replace(/\/$/, "")}/jarvis` : "",
 
   /** True when `leverxIndexerWsUrl` is configured (streams require direct indexer host). */
   indexerStreamEnabled: Boolean(leverxIndexerWsUrl),
