@@ -62,7 +62,7 @@ demo checks this up front and exits with the faucet URL rather than reverting.
 ## Contracts (Coston2 · chainId 114)
 - `MolfiMarket` `0xD709773A1128c1160b292F505FAA8E3e8d0786fF` — FTSOv2-resolved markets (enumerable)
 - `PredictEscrow` `0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067` — real-FXRP pari-mutuel + ZK-gated bets
-- `ConfidentialBet` `0xd765Fa0886FD534A176190828fc4A47c8C3Fbfd0` — hidden-side bets + ZK claim
+- `ConfidentialBet` `0x19679CceD8EF85096e779A5D7685505bE4D9bDB7` — hidden-side bets + ZK claim
 - Groth16 verifier `0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5`
 - `FXRP` `0x0b6A3645c240605887a5532109323A3E12273dc7`
 - `FtsoOracle` `0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099` — reads FTSOv2, normalized to 18 decimals

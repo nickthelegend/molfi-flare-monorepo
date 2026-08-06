@@ -10,6 +10,7 @@
  */
 import { groth16 } from "snarkjs";
 import { randomBytes, createHash } from "node:crypto";
+import { keccak256, encodeAbiParameters } from "viem";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 
@@ -21,27 +22,58 @@ export const WASM = `${CIRCUIT_DIR}/confidential_bet_js/confidential_bet.wasm`;
 export const ZKEY = `${CIRCUIT_DIR}/final.zkey`;
 
 /**
- * The fixed uniform stake per confidential note, in whole FXRP.
+ * Selectable stake sizes, in whole FXRP, read from the deploy artifact.
  *
- * Read from the deploy artifact rather than hardcoded. These two numbers are
- * printed verbatim in the bet ticket, and they were 100/200 against a contract
- * whose `denom()` is 1_000_000 base units — 1 FXRP at 6 decimals. The UI
- * promised a 100 FXRP stake and a 200 FXRP payout for a 1 FXRP escrow that pays
- * 2. Deriving it means a redeploy with a different denom can't reintroduce that.
+ * A single fixed size was never about hiding the amount — the amount moves
+ * through `transferFrom` and is public regardless. It buys UNLINKABILITY:
+ * uniform deposits mean a payout can't be traced to one deposit. Tiers keep
+ * that within each tier while letting people size a position.
+ *
+ * Derived, never hardcoded: these numbers are printed verbatim in the bet
+ * ticket, and they were once 100/200 against a contract whose denom was 1 FXRP.
  */
-function loadConfDenom() {
+function loadConfDenoms() {
   try {
     const d = JSON.parse(
       readFileSync(`${HERE}../molfi-contracts/deployments/coston2.json`, "utf8"),
     );
-    const base = Number(d.confDenom ?? 1_000_000);
-    return base / 10 ** Number(d.fxrpDecimals ?? 6);
+    const dec = Number(d.fxrpDecimals ?? 6);
+    const raw = Array.isArray(d.confDenoms) && d.confDenoms.length
+      ? d.confDenoms
+      : [d.confDenom ?? 1_000_000];
+    return raw.map((v) => Number(v) / 10 ** dec);
   } catch {
-    return 1;
+    return [1];
   }
 }
-export const CONF_DENOM = loadConfDenom();
-export const CONF_PAYOUT = CONF_DENOM * 2; // PAYOUT_MULT(2) × denom on a winning claim
+export const CONF_DENOMS = loadConfDenoms();
+export const CONF_PAYOUT_MULT = 2;
+/** Back-compat: the smallest tier, for callers that predate tiering. */
+export const CONF_DENOM = CONF_DENOMS[0];
+export const CONF_PAYOUT = CONF_DENOM * CONF_PAYOUT_MULT;
+
+/** BN254 scalar field order — public signals must be reduced into it. */
+const SNARK_R =
+  21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+
+/**
+ * The `outcome` public signal a note must carry:
+ *   keccak256(abi.encode(bytes32 marketId, uint256 tier, uint256 side)) % r
+ *
+ * MUST match ConfidentialBet.sideSignal exactly — the contract recomputes it
+ * from the resolved winner and the tier the caller names, so any disagreement
+ * makes every proof fail rather than mis-pay. abi.encode of (bytes32, uint256,
+ * uint256) is just three left-padded 32-byte words.
+ */
+export function sideSignal(marketId, tier, side) {
+  // keccak256, NOT node's "sha3-256" — those are different functions (padding
+  // differs), and a mismatch here would make every proof fail at claim time.
+  const encoded = encodeAbiParameters(
+    [{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }],
+    [marketId, BigInt(tier), BigInt(side)],
+  );
+  return (BigInt(keccak256(encoded)) % SNARK_R).toString();
+}
 
 /** True if the compiled circuit artifacts are present (proofs can be generated). */
 export function circuitAvailable() {
@@ -72,14 +104,29 @@ export function toSolProof(p) {
  * Build a confidential note for `side` ("YES" | "NO"). The commitment is a
  * binding hash of the note that reveals nothing about the chosen outcome.
  */
-export function prepareCommit(side) {
+export function prepareCommit(side, marketId, tier = 0) {
   const s = String(side || "YES").toUpperCase();
-  const outcome = s === "NO" ? 1 : 0;
+  const sideBit = s === "NO" ? 1 : 0;
+  if (!marketId) throw new Error("marketId is required — a note is bound to one market");
+  if (!(tier >= 0 && tier < CONF_DENOMS.length)) throw new Error(`bad tier ${tier}`);
+
+  // The note's `outcome` is NOT the raw 0/1 — it is the market+tier-bound
+  // signal. That binding is what stops a 1 FXRP note being claimed at 1000, and
+  // a losing note on one market being claimed on another.
+  const outcome = sideSignal(marketId, tier, sideBit);
   const note = { secret: confField(), nullifier: confField(), outcome, recipient: confField() };
   const commitment = createHash("sha256")
     .update([note.secret, note.nullifier, String(note.outcome), note.recipient].join("|"))
     .digest("hex");
-  return { note, commitment, denom: CONF_DENOM, side: outcome === 0 ? "YES" : "NO" };
+  return {
+    note,
+    commitment,
+    marketId,
+    tier,
+    denom: CONF_DENOMS[tier],
+    payout: CONF_DENOMS[tier] * CONF_PAYOUT_MULT,
+    side: sideBit === 0 ? "YES" : "NO",
+  };
 }
 
 /**

@@ -21,7 +21,15 @@ const ERC20_ABI = [
 ];
 
 /** 1 FXRP per confidential note (FXRP has 6 decimals). */
-const CONF_DENOM = 1_000_000n;
+/**
+ * Selectable confidential stake sizes, ascending, in FXRP base units (6 dp):
+ * 1 / 10 / 100 / 1000 FXRP.
+ *
+ * Each tier is its own anonymity set — uniform deposits inside a tier are what
+ * keep a payout unlinkable from a deposit. More tiers means more choice but
+ * thinner sets, so this is deliberately a short ladder.
+ */
+const CONF_DENOMS = [1_000_000n, 10_000_000n, 100_000_000n, 1_000_000_000n];
 
 async function resolveFxrp(): Promise<string> {
   // Flare's guidance: never hardcode FAssets addresses — resolve through the
@@ -68,7 +76,7 @@ async function main() {
   const [sym, dec] = await Promise.all([fxrp.symbol(), fxrp.decimals()]);
   console.log(`FXRP  ${fxrpAddress}  (${sym}, ${dec} decimals)`);
   if (Number(dec) !== 6) {
-    console.log(`  ⚠ expected 6 decimals — check CONF_DENOM before continuing`);
+    console.log(`  ⚠ expected 6 decimals — check CONF_DENOMS before continuing`);
   }
 
   // ── deploy ───────────────────────────────────────────────────────────────
@@ -97,7 +105,7 @@ async function main() {
     fxrpAddress,
     await verifier.getAddress(),
     await market.getAddress(),
-    CONF_DENOM,
+    CONF_DENOMS,
   ]);
 
   // ── sanity: read a live price through the deployed oracle ────────────────
@@ -124,7 +132,9 @@ async function main() {
     deployer: deployer.address,
     fxrp: fxrpAddress,
     fxrpDecimals: Number(dec),
-    confDenom: CONF_DENOM.toString(),
+    confDenoms: CONF_DENOMS.map((d) => d.toString()),
+    // Kept for readers that predate tiering; it is simply tier 0.
+    confDenom: CONF_DENOMS[0].toString(),
     contracts: {
       ftsoOracle: deployed.FtsoOracle,
       confidentialBetVerifier: deployed.ConfidentialBetVerifier,

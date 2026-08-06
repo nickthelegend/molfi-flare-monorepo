@@ -459,19 +459,37 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
   // ── Confidential betting: hidden commitment note → on-chain ZK claim ────────
   app.post("/api/confidential/prepare-commit", (req, res) => {
     try {
-      res.json(zk.prepareCommit(req.body?.side));
+      const { side, marketId, tier } = req.body || {};
+      if (!marketId) return res.status(400).json({ error: "marketId required" });
+      res.json(zk.prepareCommit(side, marketId, Number(tier) || 0));
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      res.status(400).json({ error: e.message });
     }
+  });
+
+  /** The selectable stake sizes, so the UI never hardcodes them. */
+  app.get("/api/confidential/tiers", (_req, res) => {
+    res.json({
+      denoms: zk.CONF_DENOMS,
+      payoutMult: zk.CONF_PAYOUT_MULT,
+      symbol: "FXRP",
+    });
   });
 
   app.post("/api/confidential/prepare-claim", async (req, res) => {
     try {
-      const { note, marketId, recipient } = req.body || {};
+      const { note, marketId, recipient, tier } = req.body || {};
       if (!note || !marketId) return res.status(400).json({ error: "note + marketId required" });
       if (!recipient) return res.status(400).json({ error: "recipient required" });
-      if (note.outcome == null || Number.isNaN(Number(note.outcome))) {
-        return res.status(400).json({ error: "note.outcome must be a number" });
+      if (note.outcome == null || !/^\d+$/.test(String(note.outcome))) {
+        return res.status(400).json({ error: "note.outcome must be a field element" });
+      }
+      const t = Number(tier) || 0;
+      // The side signal is keccak over abi.encode(bytes32,…), so a short id
+      // would throw inside the encoder and surface as a 500. A malformed id is
+      // the caller's mistake — say so.
+      if (!/^0x[0-9a-fA-F]{64}$/.test(String(marketId))) {
+        return res.status(400).json({ error: "marketId must be a 32-byte hex id" });
       }
       let resolved = false;
       try {
@@ -483,7 +501,13 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       const winner = await chain.winningOutcome(marketId);
       // A note that backed the losing side can't produce a proof the contract
       // accepts — tell the user up front instead of a guaranteed-to-revert claim.
-      if (Number(note.outcome) !== Number(winner)) {
+      //
+      // `note.outcome` is the market+tier-bound signal, not a bare 0/1, so the
+      // comparison is against the signal the contract WILL inject. That also
+      // means a note from another market or another tier reports won:false
+      // here rather than failing later with an opaque BadProof.
+      const winningSignal = zk.sideSignal(marketId, t, Number(winner));
+      if (String(note.outcome) !== String(winningSignal)) {
         return res.json({ resolved: true, won: false, winningOutcome: Number(winner) });
       }
       if (!zk.circuitAvailable()) {
@@ -497,7 +521,8 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
         resolved: true,
         won: true,
         winningOutcome: Number(winner),
-        payout: zk.CONF_PAYOUT,
+        payout: zk.CONF_DENOMS[t] * zk.CONF_PAYOUT_MULT,
+        tier: t,
         proof: p.proof,
         root: p.root,
         nullifierHash: p.nullifierHash,

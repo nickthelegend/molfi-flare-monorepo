@@ -42,17 +42,26 @@ test("confidential/prepare-claim WON path generates a real proof for the winning
     chain: mockChain({ isResolved: async () => true, winningOutcome: async () => 0 }),
   });
   try {
-    const note = { secret: zk.confField(), nullifier: zk.confField(), outcome: 0, recipient: zk.confField() };
+    // The note's outcome is the market+tier-bound signal for the WINNING side,
+    // which is what the contract will inject — a bare 0 would no longer match.
+    const MKT = "0x" + "fe".repeat(32);
+    const note = {
+      secret: zk.confField(),
+      nullifier: zk.confField(),
+      outcome: zk.sideSignal(MKT, 0, 0),
+      recipient: zk.confField(),
+    };
     const { status, body } = await h.post("/api/confidential/prepare-claim", {
       note,
-      marketId: "0xfeed",
+      marketId: MKT,
+      tier: 0,
       recipient: "0x1111111111111111111111111111111111111111",
     });
     assert.equal(status, 200);
     assert.equal(body.resolved, true);
     assert.equal(body.won, true);
     assert.equal(body.winningOutcome, 0);
-    assert.equal(body.payout, zk.CONF_PAYOUT);
+    assert.equal(body.payout, zk.CONF_DENOMS[0] * zk.CONF_PAYOUT_MULT);
     assert.equal(body.proof.a.length, 2);
     assert.match(String(body.root), /^\d+$/);
     assert.match(String(body.nullifierHash), /^\d+$/);

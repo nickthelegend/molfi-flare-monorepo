@@ -38,7 +38,7 @@ export const CONTRACTS = {
   /** confidential-bet — hidden-side commitment notes + on-chain ZK claim. */
   confidentialBet:
     (import.meta.env.VITE_CONF_BET_CONTRACT_ID as string | undefined) ??
-    "0xd765Fa0886FD534A176190828fc4A47c8C3Fbfd0",
+    "0x19679CceD8EF85096e779A5D7685505bE4D9bDB7",
   /** FtsoOracle — reads FTSOv2, normalized to 18 decimals. */
   ftsoOracle:
     (import.meta.env.VITE_FTSO_ORACLE_CONTRACT_ID as string | undefined) ??
@@ -90,16 +90,28 @@ export const FXRP_UNIT = 1_000_000;
 export const FXRP_SYMBOL = "FXRP";
 
 /**
- * ConfidentialBet's fixed stake per note — `denom()` on the deployed contract
- * (molfi-contracts/deployments/coston2.json `confDenom`).
+ * ConfidentialBet's selectable stake sizes — `denoms()` on the deployed
+ * contract (molfi-contracts/deployments/coston2.json `confDenoms`).
  *
- * The UI used to hardcode 100 / 200 FXRP here, a 100x overstatement of what the
- * contract actually escrows and pays. Every displayed figure now derives from
- * these two constants.
+ * WHY TIERS AND NOT A FREE AMOUNT. The stake was never the secret — it moves
+ * through `transferFrom`, so it is public regardless. A uniform size buys
+ * UNLINKABILITY: when every deposit in a pool is identical, a payout cannot be
+ * traced back to one deposit. A free-form amount destroys that (a 7.3 FXRP
+ * deposit is the only thing that yields a 14.6 FXRP payout), so sizes are a
+ * short ladder instead: pick one, and you are anonymous among everyone who
+ * picked the same.
+ *
+ * These are display values. The contract is the source of truth and binds the
+ * tier into the proof, so a mismatch here cannot mis-pay — it just fails.
  */
-export const CONF_DENOM_BASE = 1_000_000n;
-export const CONF_DENOM_FXRP = Number(CONF_DENOM_BASE) / FXRP_UNIT;
-export const CONF_PAYOUT_FXRP = CONF_DENOM_FXRP * 2; // PAYOUT_MULT
+export const CONF_TIERS_BASE = [1_000_000n, 10_000_000n, 100_000_000n, 1_000_000_000n] as const;
+export const CONF_TIERS_FXRP = CONF_TIERS_BASE.map((d) => Number(d) / FXRP_UNIT);
+export const CONF_PAYOUT_MULT = 2;
+
+/** Tier 0 — the default selection, and the back-compat single-denom alias. */
+export const CONF_DENOM_BASE = CONF_TIERS_BASE[0];
+export const CONF_DENOM_FXRP = CONF_TIERS_FXRP[0];
+export const CONF_PAYOUT_FXRP = CONF_DENOM_FXRP * CONF_PAYOUT_MULT;
 
 /** Back-compat aliases used throughout the premium UI. */
 export const MUSDC_DECIMALS = FXRP_DECIMALS;

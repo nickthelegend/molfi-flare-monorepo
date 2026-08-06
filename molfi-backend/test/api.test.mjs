@@ -236,35 +236,69 @@ test("GET /api/prices/:symbol falls back to a live FTSOv2 point", async () => {
   }
 });
 
+const MKT_A = "0x" + "aa".repeat(32);
+const MKT_B = "0x" + "bb".repeat(32);
+
 test("BN254 /api/confidential/prepare-commit returns a well-formed note + commitment", async () => {
-  const { status, body } = await h.post("/api/confidential/prepare-commit", { side: "NO" });
+  const { status, body } = await h.post("/api/confidential/prepare-commit", {
+    side: "NO", marketId: MKT_A, tier: 0,
+  });
   assert.equal(status, 200);
   assert.equal(body.side, "NO");
-  assert.equal(body.note.outcome, 1);
-  // The denomination must equal the DEPLOYED contract's `denom()`, not a
-  // literal. It was hardcoded to 100 against a contract whose denom is
-  // 1_000_000 base units = 1 FXRP, and the UI printed that 100 verbatim —
-  // promising a 100 FXRP stake for a 1 FXRP escrow.
+  assert.equal(body.tier, 0);
+
+  // Denominations come from the DEPLOYED contract, never a literal. They were
+  // once hardcoded to 100/200 against a contract whose denom was 1 FXRP.
   const deployed = JSON.parse(
     readFileSync(new URL("../../molfi-contracts/deployments/coston2.json", import.meta.url), "utf8"),
   );
-  assert.equal(body.denom, Number(deployed.confDenom) / 10 ** deployed.fxrpDecimals);
+  const tiers = (deployed.confDenoms ?? [deployed.confDenom]).map(
+    (d) => Number(d) / 10 ** deployed.fxrpDecimals,
+  );
+  assert.equal(body.denom, tiers[0]);
+  assert.equal(body.payout, tiers[0] * 2);
+
   // note fields are decimal BN254 field elements
   assert.match(body.note.secret, /^\d+$/);
   assert.match(body.note.nullifier, /^\d+$/);
   assert.match(body.note.recipient, /^\d+$/);
+  // outcome is the BOUND side signal, not a bare 0/1
+  assert.match(String(body.note.outcome), /^\d+$/);
+  assert.ok(BigInt(body.note.outcome) > 1n, "outcome must be the bound signal");
   // commitment is a 64-hex sha256 binding hash (reveals nothing about the side)
   assert.match(body.commitment, /^[0-9a-f]{64}$/);
 
-  const yes = await h.post("/api/confidential/prepare-commit", { side: "YES" });
-  assert.equal(yes.body.note.outcome, 0);
+  const yes = await h.post("/api/confidential/prepare-commit", {
+    side: "YES", marketId: MKT_A, tier: 0,
+  });
   assert.equal(yes.body.side, "YES");
+  assert.notEqual(yes.body.note.outcome, body.note.outcome);
+});
+
+test("prepare-commit binds the note to its market AND tier", async () => {
+  // This is what stops a 1 FXRP note being claimed at 1000, and a losing note
+  // on one market being replayed against another.
+  const base = { side: "YES", marketId: MKT_A, tier: 0 };
+  const a0 = (await h.post("/api/confidential/prepare-commit", base)).body.note.outcome;
+  const a2 = (await h.post("/api/confidential/prepare-commit", { ...base, tier: 2 })).body.note.outcome;
+  const b0 = (await h.post("/api/confidential/prepare-commit", { ...base, marketId: MKT_B })).body.note.outcome;
+  assert.notEqual(a0, a2, "tier must change the signal");
+  assert.notEqual(a0, b0, "market must change the signal");
+
+  const denoms = (await h.get("/api/confidential/tiers")).body.denoms;
+  assert.ok(denoms.length >= 1);
+  assert.deepEqual([...denoms].sort((x, y) => x - y), denoms, "tiers ascend");
+
+  const bad = await h.post("/api/confidential/prepare-commit", { ...base, tier: 99 });
+  assert.equal(bad.status, 400);
+  const noMarket = await h.post("/api/confidential/prepare-commit", { side: "YES" });
+  assert.equal(noMarket.status, 400);
 });
 
 test("confidential/prepare-claim: unresolved market → {resolved:false}", async () => {
   const { status, body } = await h.post("/api/confidential/prepare-claim", {
-    note: { secret: "1", nullifier: "2", outcome: 0, recipient: "3" },
-    marketId: "0xfeed",
+    note: { secret: "1", nullifier: "2", outcome: "12345", recipient: "3" },
+    marketId: MKT_A,
     recipient: "0x1111111111111111111111111111111111111111",
   });
   assert.equal(status, 200);
@@ -273,17 +307,25 @@ test("confidential/prepare-claim: unresolved market → {resolved:false}", async
 
 test("confidential/prepare-claim: missing recipient or non-numeric outcome → 400", async () => {
   const noRecipient = await h.post("/api/confidential/prepare-claim", {
-    note: { secret: "1", nullifier: "2", outcome: 0, recipient: "3" },
-    marketId: "0xfeed",
+    note: { secret: "1", nullifier: "2", outcome: "12345", recipient: "3" },
+    marketId: MKT_A,
   });
   assert.equal(noRecipient.status, 400);
 
   const badOutcome = await h.post("/api/confidential/prepare-claim", {
     note: { secret: "1", nullifier: "2", outcome: "nope", recipient: "3" },
-    marketId: "0xfeed",
+    marketId: MKT_A,
     recipient: "0x1111111111111111111111111111111111111111",
   });
   assert.equal(badOutcome.status, 400);
+
+  // A short/malformed market id is a 400, not a 500 from inside the encoder.
+  const badMarket = await h.post("/api/confidential/prepare-claim", {
+    note: { secret: "1", nullifier: "2", outcome: "12345", recipient: "3" },
+    marketId: "0xfeed",
+    recipient: "0x1111111111111111111111111111111111111111",
+  });
+  assert.equal(badMarket.status, 400);
 });
 
 test("confidential/prepare-claim: resolved but losing side → won:false (no proof burned)", async () => {
@@ -292,9 +334,13 @@ test("confidential/prepare-claim: resolved but losing side → won:false (no pro
     chain: mockChain({ isResolved: async () => true, winningOutcome: async () => 1 }),
   });
   try {
+    // A note whose signal isn't the winner's signal loses — including one built
+    // for a different market or tier, which now reports won:false here rather
+    // than failing later with an opaque BadProof.
     const { status, body } = await local.post("/api/confidential/prepare-claim", {
-      note: { secret: "1", nullifier: "2", outcome: 0, recipient: "3" },
-      marketId: "0xfeed",
+      note: { secret: "1", nullifier: "2", outcome: "12345", recipient: "3" },
+      marketId: MKT_A,
+      tier: 0,
       recipient: "0x1111111111111111111111111111111111111111",
     });
     assert.equal(status, 200);

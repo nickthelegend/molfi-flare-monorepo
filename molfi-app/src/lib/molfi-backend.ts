@@ -254,13 +254,21 @@ export async function fetchZkProof(): Promise<ZkProof> {
 export interface ConfNote {
   secret: string;
   nullifier: string;
-  outcome: number; // 0 YES, 1 NO
+  /**
+   * NOT a bare 0/1 — the market+tier-bound side signal, as a decimal field
+   * element. That binding is what stops a 1 FXRP note being claimed at 1000,
+   * or a losing note on one market being claimed on another.
+   */
+  outcome: string;
   recipient: string;
 }
 export interface ConfPrepareCommit {
   note: ConfNote;
   commitment: string; // hex — escrowed on-chain, reveals nothing about the side
-  denom: number; // fixed FXRP denomination
+  marketId: string;
+  tier: number;
+  denom: number; // this tier's FXRP stake
+  payout: number; // denom × PAYOUT_MULT
   side: "YES" | "NO";
 }
 export interface ConfPrepareClaim {
@@ -274,12 +282,16 @@ export interface ConfPrepareClaim {
   recipientField?: string;
 }
 
-/** Generate a hidden commitment note for a confidential bet on `side`. */
-export async function fetchConfidentialNote(side: "YES" | "NO"): Promise<ConfPrepareCommit> {
+/** Generate a hidden commitment note for a confidential bet on `side` at `tier`. */
+export async function fetchConfidentialNote(
+  side: "YES" | "NO",
+  marketId: string,
+  tier: number,
+): Promise<ConfPrepareCommit> {
   const r = await fetch(`${BASE}/api/confidential/prepare-commit`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ side }),
+    body: JSON.stringify({ side, marketId, tier }),
   });
   if (!r.ok) throw new Error("Confidential service unavailable");
   return r.json();
@@ -293,11 +305,12 @@ export async function fetchConfidentialClaim(
   note: ConfNote,
   marketId: string,
   recipient: string,
+  tier: number,
 ): Promise<ConfPrepareClaim> {
   const r = await fetch(`${BASE}/api/confidential/prepare-claim`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ note, marketId, recipient }),
+    body: JSON.stringify({ note, marketId, recipient, tier }),
   });
   if (!r.ok) throw new Error("Confidential proof service unavailable");
   return r.json();

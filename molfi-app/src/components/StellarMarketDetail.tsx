@@ -30,8 +30,8 @@ import {
 } from "@/lib/stellar/soroban";
 import {
   CONTRACTS,
-  CONF_DENOM_FXRP,
-  CONF_PAYOUT_FXRP,
+  CONF_TIERS_FXRP,
+  CONF_PAYOUT_MULT,
   FXRP_UNIT,
   OUTCOME,
   contractUrl,
@@ -717,6 +717,9 @@ function OnChainDetail({ id }: { id: string }) {
   const [confidential, setConfidential] = useState(false);
   const [confNotes, setConfNotes] = useState<StoredConfNote[]>([]);
   const [confBusy, setConfBusy] = useState<string | null>(null); // "commit" | nullifier | null
+  /** Which denomination tier a confidential bet uses. Each tier is its own
+   *  anonymity set, so this is a real privacy choice, not just a size. */
+  const [confTier, setConfTier] = useState(0);
 
   const marketQuery = useQuery({
     queryKey: ["onchain-market", id],
@@ -763,21 +766,23 @@ function OnChainDetail({ id }: { id: string }) {
     setConfNotes(loadConfNotes(id, address));
   }, [id, address]);
 
-  /** Place a confidential bet: escrow a uniform {CONF_DENOM_FXRP} FXRP commitment
-   *  note whose side is hidden on-chain, and stash the note locally to claim after
-   *  resolution. */
+  /** Place a confidential bet: escrow this tier's stake against a note whose
+   *  side is hidden on-chain, and stash the note locally to claim after
+   *  resolution. The note is bound to (market, tier, side), so it can only ever
+   *  be claimed here, at this size. */
   const handleConfidentialBet = async () => {
     if (!address) return void connect();
     setConfBusy("commit");
     try {
       const sideStr = side === OUTCOME.YES ? "YES" : "NO";
-      const prep = await fetchConfidentialNote(sideStr);
-      const hash = await confidentialCommit(address, prep.commitment);
+      const prep = await fetchConfidentialNote(sideStr, id, confTier);
+      const hash = await confidentialCommit(address, id, confTier, prep.commitment);
       setConfNotes(
         addConfNote(id, address, {
           ...prep.note,
           commitment: prep.commitment,
           side: prep.side,
+          tier: prep.tier,
           denom: prep.denom,
           committedTx: hash,
           committedAt: Date.now(),
@@ -788,7 +793,7 @@ function OnChainDetail({ id }: { id: string }) {
       const msg = e instanceof Error ? e.message : "Confidential bet failed";
       showError(
         /balance|insufficient/i.test(msg)
-          ? `Need ${CONF_DENOM_FXRP} FXRP — use the faucet first.`
+          ? `Need ${CONF_TIERS_FXRP[confTier]} FXRP — use the faucet first.`
           : msg,
       );
     } finally {
@@ -811,6 +816,7 @@ function OnChainDetail({ id }: { id: string }) {
         },
         id,
         address,
+        note.tier ?? 0,
       );
       if (!prep.resolved) return showError("Market isn't resolved yet — claim once it settles.");
       if (!prep.won || !prep.proof) {
@@ -819,6 +825,7 @@ function OnChainDetail({ id }: { id: string }) {
       const hash = await confidentialClaim(
         address,
         id,
+        note.tier ?? 0,
         prep.proof,
         prep.nullifierHash as string,
         prep.recipientField as string,
@@ -1082,13 +1089,47 @@ function OnChainDetail({ id }: { id: string }) {
                 </div>
                 {confidential ? (
                   <>
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Stake size
+                      </span>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {CONF_TIERS_FXRP.map((amount, tier) => (
+                          <button
+                            key={tier}
+                            type="button"
+                            onClick={() => setConfTier(tier)}
+                            className={cn(
+                              "rounded-lg py-2 font-mono text-xs font-semibold transition",
+                              tier === confTier
+                                ? "bg-accent/15 text-accent ring-2 ring-accent/40"
+                                : "border border-border text-muted-foreground hover:text-foreground",
+                            )}
+                          >
+                            {amount >= 1000 ? `${amount / 1000}k` : amount}
+                          </button>
+                        ))}
+                      </div>
+                      {/* The size is public either way — it moves through
+                          transferFrom. What the fixed sizes buy is that your
+                          payout can't be matched to your deposit, and that only
+                          holds against others who chose the same one. */}
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        Each size is a separate anonymity set — you blend in with everyone who
+                        picked the same one, so a busier tier hides you better.
+                      </p>
+                    </div>
                     <div className="flex items-center justify-between rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs">
-                      <span className="text-muted-foreground">Stake (uniform · hides amount)</span>
-                      <span className="font-mono font-semibold text-foreground">{CONF_DENOM_FXRP} FXRP</span>
+                      <span className="text-muted-foreground">Stake · side hidden</span>
+                      <span className="font-mono font-semibold text-foreground">
+                        {CONF_TIERS_FXRP[confTier]} FXRP
+                      </span>
                     </div>
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Payout if your side wins</span>
-                      <span className="font-mono text-foreground">{CONF_PAYOUT_FXRP} FXRP</span>
+                      <span className="font-mono text-foreground">
+                        {CONF_TIERS_FXRP[confTier] * CONF_PAYOUT_MULT} FXRP
+                      </span>
                     </div>
                     <Button
                       onClick={handleConfidentialBet}

@@ -10,6 +10,9 @@ import type { ConfNote } from "@/lib/molfi-backend";
 export interface StoredConfNote extends ConfNote {
   commitment: string;
   side: "YES" | "NO";
+  /** Which denomination tier this note was committed at. The claim MUST use the
+   *  same one — it is bound into the proof, so a mismatch simply cannot verify. */
+  tier: number;
   denom: number;
   committedTx: string;
   committedAt: number;

@@ -29,7 +29,9 @@ const FXRP = D.fxrp;
 /** FTSOv2 BTC/USD — a bytes21 FEED ID, not a contract address. */
 const BTC_USD = D.feeds["BTC/USD"];
 /** Fixed stake per note. 6-decimal FXRP, so 1_000_000 == 1 FXRP. */
-const DENOM = BigInt(D.confDenom);
+/** Tier 0 of the denomination ladder — the smallest, so the demo is cheap. */
+const TIER = 0;
+const DENOM = BigInt((D.confDenoms ?? [D.confDenom])[TIER]);
 const UNIT = 10n ** BigInt(D.fxrpDecimals);
 const RPC = process.env.MOLFI_RPC || D.rpc;
 const WASM = `${HERE}../../molfi-circuits/build/confidential_bet/confidential_bet_js/confidential_bet.wasm`;
@@ -66,13 +68,14 @@ const MARKET_ABI = [
   { type: "function", name: "winningOutcome", stateMutability: "view", inputs: [{ type: "bytes32" }], outputs: [{ type: "uint32" }] },
 ];
 const CBET_ABI = [
-  { type: "function", name: "commit", stateMutability: "nonpayable", inputs: [{ type: "uint256" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "commit", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }], outputs: [{ type: "uint256" }] },
   // Roots are keyed BY MARKET — a root checkpointed for one market is not valid
   // for another, which is what stops a losing note being re-aimed elsewhere.
-  { type: "function", name: "registerRoot", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }], outputs: [] },
+  { type: "function", name: "registerRoot", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }], outputs: [] },
+  { type: "function", name: "sideSignal", stateMutability: "pure", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "claim", stateMutability: "nonpayable", inputs: [
-      { type: "bytes32" }, { type: "uint256[2]" }, { type: "uint256[2][2]" }, { type: "uint256[2]" }, { type: "uint256" }, { type: "uint256" }, { type: "address" }], outputs: [] },
-  { type: "function", name: "poolStatus", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }, { type: "uint256" }] },
+      { type: "bytes32" }, { type: "uint256" }, { type: "uint256[2]" }, { type: "uint256[2][2]" }, { type: "uint256[2]" }, { type: "uint256" }, { type: "uint256" }, { type: "address" }], outputs: [] },
+  { type: "function", name: "poolStatus", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "uint256" }, { type: "uint256" }] },
 ];
 
 const send = async (wallet, args) => {
@@ -118,11 +121,31 @@ const fundTx = await opWallet.sendTransaction({ to: agent.address, value: parseE
 await pub.waitForTransactionReceipt({ hash: fundTx });
 console.log(`  funded: 0.5 C2FLR (gas) + ${fxrp(DENOM)} bankroll\n`);
 
-// 2) the agent decides a HIDDEN side and proves it in zero-knowledge
+// 2) operator opens a market on the LIVE FTSOv2 BTC/USD feed
+//    This has to come FIRST now: the note's side signal is bound to the market
+//    id and the tier, and `commit` refuses once the market has closed.
+const mid = keccak256(toHex(`molfi-agent-${agent.address}-${Date.now()}`));
+// closeTs must be in the FUTURE (MolfiMarket rejects closeTs <= now); a little
+// way out, then we wait for it to pass before resolving.
+const closeTs = BigInt(Math.floor(Date.now() / 1000) + 45);
+// threshold is 18-decimal: FtsoOracle normalizes every feed to PRICE_DECIMALS=18,
+// and the market compares against it directly. $50,000 with BTC far above it
+// makes YES — the agent's hidden side — the certain winner.
+await send(opWallet, { address: MARKET, abi: MARKET_ABI, functionName: "createPriceMarket", args: [mid, "Will BTC/USD be >= $50,000?", closeTs, BTC_USD, 50_000n * 10n ** 18n, 0, 86400n] });
+console.log(`  market opened: ${mid.slice(0, 12)}… closes in 45s`);
+
+// 3) the agent decides a HIDDEN side and proves it in zero-knowledge
 const side = 0; // 0 = YES (hidden — never goes on-chain)
+// The note commits to the BOUND signal, not a bare 0/1. Reading it from the
+// contract rather than recomputing it here means the demo cannot drift from the
+// verifier's own encoding.
+const outcomeSignal = await pub.readContract({
+  address: CBET, abi: CBET_ABI, functionName: "sideSignal",
+  args: [mid, BigInt(TIER), BigInt(side)],
+});
 const seed = BigInt(keccak256(toHex(agent.address + Date.now()))) % (2n ** 240n);
 const input = {
-  secret: String(seed), nullifier: String(seed + 1n), outcome: String(side),
+  secret: String(seed), nullifier: String(seed + 1n), outcome: String(outcomeSignal),
   recipient: BigInt(agent.address).toString(),
   pathElements: ["1", "2", "3", "4", "5", "6", "7", "8"], pathIndices: ["0", "1", "0", "1", "0", "0", "1", "0"],
 };
@@ -131,26 +154,16 @@ const { proof, publicSignals } = await groth16.fullProve(input, WASM, ZKEY);
 const root = BigInt(publicSignals[0]); const nullifierHash = BigInt(publicSignals[1]);
 const { a, b, c } = toSol(proof);
 
-// 3) commit the bet (escrow denom) — side stays hidden
+// 4) commit the bet (escrow this tier's stake) — side stays hidden
 await send(agentWallet, { address: FXRP, abi: FXRP_ABI, functionName: "approve", args: [CBET, DENOM] });
-const commitTx = await send(agentWallet, { address: CBET, abi: CBET_ABI, functionName: "commit", args: [nullifierHash] });
-console.log(`  committed hidden bet · ${explore(commitTx)}`);
-
-// 4) operator opens a market on the LIVE FTSOv2 BTC/USD feed + checkpoints root
-const mid = keccak256(toHex(`molfi-agent-${agent.address}-${Date.now()}`));
-// closeTs must be in the FUTURE (MolfiMarket rejects closeTs <= now); a few seconds
-// out, then we wait for it to pass before resolving.
-const closeTs = BigInt(Math.floor(Date.now() / 1000) + 30);
-// threshold is 18-decimal: FtsoOracle normalizes every feed to PRICE_DECIMALS=18,
-// and the market compares against it directly. $50,000 with BTC far above it
-// makes YES — the agent's hidden side — the certain winner.
-await send(opWallet, { address: MARKET, abi: MARKET_ABI, functionName: "createPriceMarket", args: [mid, "Will BTC/USD be >= $50,000?", closeTs, BTC_USD, 50_000n * 10n ** 18n, 0, 86400n] });
-await send(opWallet, { address: CBET, abi: CBET_ABI, functionName: "registerRoot", args: [mid, root] });
+const commitTx = await send(agentWallet, { address: CBET, abi: CBET_ABI, functionName: "commit", args: [mid, BigInt(TIER), nullifierHash] });
+console.log(`  committed hidden bet · ${fxrp(DENOM)} · ${explore(commitTx)}`);
+await send(opWallet, { address: CBET, abi: CBET_ABI, functionName: "registerRoot", args: [mid, BigInt(TIER), root] });
 
 // 4b) seed the pool so the 2x claim can be paid. The contract holds only the one
 //     committed note (DENOM); claim() needs DENOM * PAYOUT_MULT.
 await send(opWallet, { address: FXRP, abi: FXRP_ABI, functionName: "transfer", args: [CBET, DENOM * 2n] });
-const [poolBal, covered] = await pub.readContract({ address: CBET, abi: CBET_ABI, functionName: "poolStatus" });
+const [poolBal, covered] = await pub.readContract({ address: CBET, abi: CBET_ABI, functionName: "poolStatus", args: [BigInt(TIER)] });
 console.log(`  pool seeded: ${fxrp(poolBal)} — covers ${covered} claim(s)`);
 
 // 5) resolve from FTSOv2 (permissionless) — wait until the market has closed
@@ -161,7 +174,7 @@ console.log(`  market resolved from FTSOv2 → winner ${winner === 0 ? "YES" : "
 
 // 6) the agent CLAIMS — proving its hidden side == the winner, unlinkable
 const before = await pub.readContract({ address: FXRP, abi: FXRP_ABI, functionName: "balanceOf", args: [agent.address] });
-const claimTx = await send(agentWallet, { address: CBET, abi: CBET_ABI, functionName: "claim", args: [mid, a, b, c, root, nullifierHash, agent.address] });
+const claimTx = await send(agentWallet, { address: CBET, abi: CBET_ABI, functionName: "claim", args: [mid, BigInt(TIER), a, b, c, root, nullifierHash, agent.address] });
 const after = await pub.readContract({ address: FXRP, abi: FXRP_ABI, functionName: "balanceOf", args: [agent.address] });
 console.log(`  confidential claim · ${explore(claimTx)}`);
 console.log(`\n  payout: ${fxrp(after - before)} (2× denom) — side never revealed on-chain`);

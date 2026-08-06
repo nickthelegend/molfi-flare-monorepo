@@ -32,7 +32,7 @@ import {
   FLARE,
   MUSDC_UNIT,
   MUSDC_DECIMALS,
-  CONF_DENOM_BASE,
+  CONF_TIERS_BASE,
   FAUCET_URL,
   txUrl,
 } from "@/lib/stellar/contracts";
@@ -112,8 +112,10 @@ const ESCROW_ABI = [
 ] as const satisfies Abi;
 
 const CBET_ABI = [
-  { type: "function", name: "commit", stateMutability: "nonpayable", inputs: [{ type: "uint256" }], outputs: [{ type: "uint256" }] },
-  { type: "function", name: "claim", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256[2]" }, { type: "uint256[2][2]" }, { type: "uint256[2]" }, { type: "uint256" }, { type: "uint256" }, { type: "address" }], outputs: [] },
+  { type: "function", name: "commit", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "claim", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "uint256[2]" }, { type: "uint256[2][2]" }, { type: "uint256[2]" }, { type: "uint256" }, { type: "uint256" }, { type: "address" }], outputs: [] },
+  { type: "function", name: "denoms", stateMutability: "view", inputs: [], outputs: [{ type: "uint256[]" }] },
+  { type: "function", name: "poolStatus", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "uint256" }, { type: "uint256" }] },
 ] as const satisfies Abi;
 
 // ---------------------------------------------------------------------------
@@ -378,11 +380,31 @@ export async function vaultDepositOnChain(walletAddress: string, amountUsdc: num
  * a binding hash of an off-chain note (secret, nullifier, chosen side) — nothing
  * on-chain reveals which outcome it backs, and the uniform denom hides the amount.
  */
-export async function confidentialCommit(walletAddress: string, commitmentHex: string): Promise<string> {
-  // ConfidentialBet.commit pulls exactly one denom of FXRP from the sender.
-  // This approved 100x the denom while the contract only ever pulls one.
-  await ensureAllowance(walletAddress, CONTRACTS.confidentialBet, CONF_DENOM_BASE);
-  return send(CONTRACTS.confidentialBet, CBET_ABI, "commit", [bigHex(commitmentHex)], FXRP_GAS);
+export async function confidentialCommit(
+  walletAddress: string,
+  marketIdHex: string,
+  tier: number,
+  commitmentHex: string,
+): Promise<string> {
+  // Approve exactly this tier's stake — the contract pulls denoms[tier] and
+  // nothing more.
+  const stake = CONF_TIERS_BASE[tier] ?? CONF_TIERS_BASE[0];
+  await ensureAllowance(walletAddress, CONTRACTS.confidentialBet, stake);
+  return send(
+    CONTRACTS.confidentialBet,
+    CBET_ABI,
+    "commit",
+    [asHex(marketIdHex), BigInt(tier), bigHex(commitmentHex)],
+    FXRP_GAS,
+  );
+}
+
+/** Collateral held and how many claims of `tier` it covers. */
+export async function confidentialPoolStatus(tier: number): Promise<{ balance: bigint; claimsCovered: bigint }> {
+  const [balance, claimsCovered] = (await read(
+    CONTRACTS.confidentialBet, CBET_ABI, "poolStatus", [BigInt(tier)],
+  )) as [bigint, bigint];
+  return { balance, claimsCovered };
 }
 
 /**
@@ -394,6 +416,7 @@ export async function confidentialCommit(walletAddress: string, commitmentHex: s
 export async function confidentialClaim(
   walletAddress: string,
   marketIdHex: string,
+  tier: number,
   proof: RawProof,
   nullifierHashHex: string,
   _recipientFieldHex: string,
@@ -402,6 +425,7 @@ export async function confidentialClaim(
   const { a, b, c } = toSolProof(proof);
   return send(CONTRACTS.confidentialBet, CBET_ABI, "claim", [
     asHex(marketIdHex),
+    BigInt(tier),
     a,
     b,
     c,
