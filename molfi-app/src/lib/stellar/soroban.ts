@@ -33,6 +33,7 @@ import {
   MUSDC_UNIT,
   MUSDC_DECIMALS,
   FAUCET_URL,
+  txUrl,
 } from "@/lib/stellar/contracts";
 
 // ---------------------------------------------------------------------------
@@ -193,7 +194,20 @@ async function send(
     account: wallet.account ?? account,
     chain: coston2Chain,
   });
-  await publicClient.waitForTransactionReceipt({ hash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+  // A mined transaction is not a successful one. Without this check the UI
+  // showed a green "bet placed" toast — with an explorer link — for a bet that
+  // reverted, so a user with insufficient FXRP believed they held a position
+  // they did not. Reverts here are ordinary (not enough FXRP, allowance spent,
+  // market closed between quote and send), so they must surface as failures.
+  if (receipt.status !== "success") {
+    throw new Error(
+      `Transaction reverted on-chain (${functionName}). ` +
+        `Check your FXRP balance and that the market is still open. ` +
+        `Details: ${txUrl(hash)}`,
+    );
+  }
   return hash;
 }
 

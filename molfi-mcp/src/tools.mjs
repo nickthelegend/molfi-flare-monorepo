@@ -211,7 +211,12 @@ export async function resolveMarket({ marketId }) {
     address: getAddress(CONTRACTS.market), abi: MARKET_ABI,
     functionName: "resolveFromOracle", args: [asHex(marketId)], gas: GAS.tx,
   });
-  await publicClient.waitForTransactionReceipt({ hash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  // Mined is not the same as succeeded — report a revert as a failure rather
+  // than telling the agent the market settled when it did not.
+  if (receipt.status !== "success") {
+    throw new Error(`resolve reverted on-chain — see ${txUrl(hash)}`);
+  }
   const after = await readMarket(marketId);
   return { ok: true, marketId: asHex(marketId), winningOutcome: after.winningOutcome, hash, url: txUrl(hash) };
 }
@@ -231,7 +236,13 @@ export async function redeem({ marketId, address }) {
     address: getAddress(CONTRACTS.escrow), abi: ESCROW_ABI, functionName: "redeem",
     args: [asHex(marketId), who], gas: GAS.fxrp,
   });
-  await publicClient.waitForTransactionReceipt({ hash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") {
+    throw new Error(
+      `redeem reverted on-chain — you may hold no winning position, or have ` +
+        `already redeemed. See ${txUrl(hash)}`,
+    );
+  }
   const after = await publicClient.readContract({
     address: getAddress(CONTRACTS.fxrp), abi: ERC20_ABI, functionName: "balanceOf", args: [who],
   });
