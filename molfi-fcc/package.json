@@ -1,0 +1,15 @@
+{
+  "name": "@molfi/fcc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Molfi's Flare Confidential Compute extension — seals the order book until close, then opens it inside the enclave.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "open": "node scripts/open-market.mjs"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
+  }
+}
