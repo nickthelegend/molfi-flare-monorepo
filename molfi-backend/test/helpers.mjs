@@ -12,10 +12,10 @@ import * as realZk from "../zk.js";
 export function mockChain(overrides = {}) {
   return {
     CONTRACTS: {
-      predictEscrow: "0x220BB958923eF274Fe61C8318559EeC2D5c5492f",
-      market: "0x6a9bC905c9ba5976BBaE19A92B6Fc032Ff0233FC",
+      predictEscrow: "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
+      market: "0xD709773A1128c1160b292F505FAA8E3e8d0786fF",
       fxrp: "0x0b6A3645c240605887a5532109323A3E12273dc7",
-      ftsoOracle: "0xDaeBBa2A3A354E7677f5F005F0fCa0b24b8189B3",
+      ftsoOracle: "0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099",
     },
     // FTSOv2 feed ids — the app maps these back to symbols when reading a
     // market straight from chain, so the mock has to carry them too.

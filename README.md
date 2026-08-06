@@ -47,11 +47,11 @@ contract call.
 
 | Contract | Address |
 |---|---|
-| `FtsoOracle` | [`0xDaeBBa2A3A354E7677f5F005F0fCa0b24b8189B3`](https://coston2-explorer.flare.network/address/0xDaeBBa2A3A354E7677f5F005F0fCa0b24b8189B3) |
-| `MolfiMarket` | [`0x6a9bC905c9ba5976BBaE19A92B6Fc032Ff0233FC`](https://coston2-explorer.flare.network/address/0x6a9bC905c9ba5976BBaE19A92B6Fc032Ff0233FC) |
-| `PredictEscrow` | [`0x220BB958923eF274Fe61C8318559EeC2D5c5492f`](https://coston2-explorer.flare.network/address/0x220BB958923eF274Fe61C8318559EeC2D5c5492f) |
-| `ConfidentialBet` | [`0xde2C0105DC046bd428E68d425ad6177507f64BBE`](https://coston2-explorer.flare.network/address/0xde2C0105DC046bd428E68d425ad6177507f64BBE) |
-| `ConfidentialBetVerifier` (BN254) | [`0x7a6995201d02bE66a2394587Dc31E72818ca2365`](https://coston2-explorer.flare.network/address/0x7a6995201d02bE66a2394587Dc31E72818ca2365) |
+| `FtsoOracle` | [`0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099`](https://coston2-explorer.flare.network/address/0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099) |
+| `MolfiMarket` | [`0xD709773A1128c1160b292F505FAA8E3e8d0786fF`](https://coston2-explorer.flare.network/address/0xD709773A1128c1160b292F505FAA8E3e8d0786fF) |
+| `PredictEscrow` | [`0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865`](https://coston2-explorer.flare.network/address/0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865) |
+| `ConfidentialBet` | [`0xd765Fa0886FD534A176190828fc4A47c8C3Fbfd0`](https://coston2-explorer.flare.network/address/0xd765Fa0886FD534A176190828fc4A47c8C3Fbfd0) |
+| `ConfidentialBetVerifier` (BN254) | [`0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5`](https://coston2-explorer.flare.network/address/0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5) |
 | `FXRP` (FAssets FTestXRP, 6 dp) | [`0x0b6A3645c240605887a5532109323A3E12273dc7`](https://coston2-explorer.flare.network/address/0x0b6A3645c240605887a5532109323A3E12273dc7) |
 
 FXRP is resolved through `ContractRegistry.getAssetManagerFXRP().fAsset()` rather

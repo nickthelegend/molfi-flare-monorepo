@@ -18,6 +18,15 @@ interface IMarketRef {
     function isResolved(bytes32 id) external view returns (bool);
 
     function winningOutcome(bytes32 id) external view returns (uint32);
+
+    /// @dev Reverts for a market that does not exist — which is exactly what we
+    ///      want when someone tries to escrow into a made-up id.
+    function getMarket(
+        bytes32 id
+    )
+        external
+        view
+        returns (string memory question, uint64 closeTs, uint8 status, uint32 outcome);
 }
 
 /// @title PredictEscrow — pari-mutuel stake escrow, collateralized in **FXRP**.
@@ -119,6 +128,21 @@ contract PredictEscrow is ReentrancyGuard {
         // No new stake once the market has resolved — a late bet could never be
         // redeemed fairly (it isn't part of the pool the winners split).
         if (market.isResolved(marketId)) revert MarketClosed();
+
+        // CRITICAL: betting must stop at close, not at resolution.
+        //
+        // Settlement reads the FTSO price at close, and that price is public the
+        // instant close passes. Resolution is permissionless, so there is always
+        // a window — seconds or hours — between close and someone calling
+        // resolve. Allowing bets in that window lets anyone read the settled
+        // outcome and then stake on the winning side risk-free, taking the pot
+        // from everyone who bet before they knew.
+        //
+        // getMarket also reverts on an unknown id, so this simultaneously stops
+        // FXRP being escrowed into a market that does not exist — funds that
+        // could never be redeemed because the market can never resolve.
+        (, uint64 closeTs, , ) = market.getMarket(marketId);
+        if (block.timestamp >= closeTs) revert MarketClosed();
 
         // FXRP is a real FAssets token; use SafeERC20 rather than assuming a
         // bool return, and measure the delta so any future fee-on-transfer

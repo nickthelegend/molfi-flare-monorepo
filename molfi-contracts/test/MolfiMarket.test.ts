@@ -373,3 +373,50 @@ describe("MolfiMarket — FTSO-settled lifecycle", () => {
     await expect(market.winningOutcome(id("open"))).to.be.revertedWith("not resolved");
   });
 });
+
+describe("MolfiMarket — admin override is an escape hatch, not an override", () => {
+  it("REFUSES an admin hand-settle of a live oracle market", async () => {
+    const { market } = await deploy();
+    const close = (await time.latest()) + DAY;
+    await market.createPriceMarket(
+      id("live"), "q", close, XRP_USD, usd("3"), OP_GTE, DAY * 2,
+    );
+    // Before close: admin must not be able to pick the winner at all.
+    await expect(market.resolve(id("live"), 1)).to.be.revertedWithCustomError(
+      market,
+      "NotClosed",
+    );
+  });
+
+  it("REFUSES an admin hand-settle while FTSO could still settle it", async () => {
+    const { market } = await deploy();
+    const close = (await time.latest()) + DAY;
+    await market.createPriceMarket(
+      id("recent"), "q", close, XRP_USD, usd("3"), OP_GTE, DAY * 2,
+    );
+    await time.increaseTo(close + 60); // closed, but well inside the delay
+    await expect(market.resolve(id("recent"), 1)).to.be.revertedWithCustomError(
+      market,
+      "OracleSettlementAvailable",
+    );
+  });
+
+  it("ALLOWS an admin hand-settle once the feed has been stuck past the delay", async () => {
+    const { market } = await deploy();
+    const close = (await time.latest()) + DAY;
+    await market.createPriceMarket(
+      id("stuck"), "q", close, XRP_USD, usd("3"), OP_GTE, DAY * 2,
+    );
+    await time.increaseTo(close + 24 * 3600 + 1);
+    await market.resolve(id("stuck"), 1);
+    expect(await market.winningOutcome(id("stuck"))).to.equal(NO);
+  });
+
+  it("still lets admin resolve a non-oracle market immediately", async () => {
+    const { market } = await deploy();
+    const close = (await time.latest()) + DAY;
+    await market.create(id("manual"), "q", close);
+    await market.resolve(id("manual"), 0);
+    expect(await market.winningOutcome(id("manual"))).to.equal(YES);
+  });
+});

@@ -321,3 +321,33 @@ describe("PredictEscrow — pari-mutuel in FXRP", () => {
     });
   });
 });
+
+describe("PredictEscrow — security regressions", () => {
+  it("REJECTS a bet placed after close but before resolution", async () => {
+    // The settling price is public the moment close passes, and resolution is
+    // permissionless — so any window between the two lets a late better read
+    // the outcome and take the pot risk-free.
+    const { escrow, alice, bob, MKT, close } = await deploy();
+    await escrow.connect(alice).bet(MKT, YES, fxrp("100"));
+
+    await time.increaseTo(close + 1); // closed, but nobody has resolved yet
+
+    await expect(
+      escrow.connect(bob).bet(MKT, YES, fxrp("1000")),
+    ).to.be.revertedWithCustomError(escrow, "MarketClosed");
+  });
+
+  it("still accepts a bet in the final second before close", async () => {
+    const { escrow, alice, MKT, close } = await deploy();
+    await time.increaseTo(close - 2);
+    await expect(escrow.connect(alice).bet(MKT, YES, fxrp("10"))).to.not.be.reverted;
+  });
+
+  it("REJECTS escrowing into a market that does not exist", async () => {
+    // Otherwise the FXRP is stranded: no such market can ever resolve, so the
+    // stake can never be redeemed.
+    const { escrow, alice } = await deploy();
+    const ghost = id("no-such-market");
+    await expect(escrow.connect(alice).bet(ghost, YES, fxrp("10"))).to.be.reverted;
+  });
+});

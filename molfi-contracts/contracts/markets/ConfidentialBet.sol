@@ -62,11 +62,22 @@ contract ConfidentialBet is ReentrancyGuard {
     address public admin;
 
     uint256[] public commitments; // note commitments (off-chain Poseidon tree)
-    mapping(uint256 => bool) public knownRoot; // checkpointed off-chain roots
+
+    /// @notice Checkpointed Poseidon roots, keyed BY MARKET.
+    ///
+    /// @dev This is the fix for a cross-market claim. The circuit's public
+    ///      signals are [root, nullifierHash, outcome, recipient] — no market
+    ///      id — so with one global root set, a note that backed the losing side
+    ///      of market A could be claimed against market B whose winner happened
+    ///      to match. The note would verify, because nothing tied it to A.
+    ///      Keying the root by market restores that binding without touching the
+    ///      circuit: a root registered for A simply is not valid for B.
+    mapping(bytes32 => mapping(uint256 => bool)) public knownRoot;
+
     mapping(uint256 => bool) public nullifierUsed;
 
     event Commit(uint256 indexed index, uint256 commitment, uint256 amount);
-    event RootRegistered(uint256 root);
+    event RootRegistered(bytes32 indexed marketId, uint256 root);
     event Claim(
         uint256 indexed nullifierHash,
         address indexed recipient,
@@ -128,10 +139,11 @@ contract ConfidentialBet is ReentrancyGuard {
     mapping(uint256 => bool) private _commitmentSeen;
 
     /// Operator checkpoints a Poseidon tree root computed off-chain from the
-    /// commitments (the EVM has no native Poseidon, matching the original design).
-    function registerRoot(uint256 root) external onlyAdmin {
-        knownRoot[root] = true;
-        emit RootRegistered(root);
+    /// commitments (the EVM has no native Poseidon, matching the original
+    /// design). The root is scoped to ONE market — see `knownRoot`.
+    function registerRoot(bytes32 marketId, uint256 root) external onlyAdmin {
+        knownRoot[marketId][root] = true;
+        emit RootRegistered(marketId, root);
     }
 
     /// Claim a winning note. Verifies the ZK proof that the note's side equals
@@ -150,7 +162,10 @@ contract ConfidentialBet is ReentrancyGuard {
     ) external nonReentrant {
         if (recipient == address(0)) revert ZeroAddress();
         if (!market.isResolved(marketId)) revert NotResolved();
-        if (!knownRoot[root]) revert UnknownRoot();
+        // Scoped to this market — a root checkpointed for another market is not
+        // accepted here, so a losing note cannot be re-aimed at a market whose
+        // winner happens to match.
+        if (!knownRoot[marketId][root]) revert UnknownRoot();
         if (nullifierUsed[nullifierHash]) revert NullifierSpent();
 
         // The winner comes from the market, never from the caller — this is what

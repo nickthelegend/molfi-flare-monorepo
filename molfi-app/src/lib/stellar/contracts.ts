@@ -27,22 +27,22 @@ export const READ_SOURCE = "0x0000000000000000000000000000000000000000";
 export const CONTRACTS = {
   verifier:
     (import.meta.env.VITE_VERIFIER_CONTRACT_ID as string | undefined) ??
-    "0x7a6995201d02bE66a2394587Dc31E72818ca2365",
+    "0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5",
   market:
     (import.meta.env.VITE_MARKET_CONTRACT_ID as string | undefined) ??
-    "0x6a9bC905c9ba5976BBaE19A92B6Fc032Ff0233FC",
+    "0xD709773A1128c1160b292F505FAA8E3e8d0786fF",
   /** predict-escrow — FXRP-collateralized pari-mutuel betting + ZK-gated bets. */
   predictEscrow:
     (import.meta.env.VITE_PREDICT_ESCROW_CONTRACT_ID as string | undefined) ??
-    "0x220BB958923eF274Fe61C8318559EeC2D5c5492f",
+    "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
   /** confidential-bet — hidden-side commitment notes + on-chain ZK claim. */
   confidentialBet:
     (import.meta.env.VITE_CONF_BET_CONTRACT_ID as string | undefined) ??
-    "0xde2C0105DC046bd428E68d425ad6177507f64BBE",
+    "0xd765Fa0886FD534A176190828fc4A47c8C3Fbfd0",
   /** FtsoOracle — reads FTSOv2, normalized to 18 decimals. */
   ftsoOracle:
     (import.meta.env.VITE_FTSO_ORACLE_CONTRACT_ID as string | undefined) ??
-    "0xDaeBBa2A3A354E7677f5F005F0fCa0b24b8189B3",
+    "0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099",
   /**
    * FXRP — FAssets-wrapped XRP, the collateral for every market.
    *
@@ -60,10 +60,10 @@ export const CONTRACTS = {
   },
   clobSettlement:
     (import.meta.env.VITE_PREDICT_ESCROW_CONTRACT_ID as string | undefined) ??
-    "0x220BB958923eF274Fe61C8318559EeC2D5c5492f",
+    "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
   vault:
     (import.meta.env.VITE_PREDICT_ESCROW_CONTRACT_ID as string | undefined) ??
-    "0x220BB958923eF274Fe61C8318559EeC2D5c5492f",
+    "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
 } as const;
 
 /**

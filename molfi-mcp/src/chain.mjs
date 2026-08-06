@@ -35,9 +35,9 @@ export const coston2 = defineChain({
 });
 
 export const CONTRACTS = {
-  market: process.env.MOLFI_MARKET || "0x6a9bC905c9ba5976BBaE19A92B6Fc032Ff0233FC",
-  escrow: process.env.MOLFI_ESCROW || "0x220BB958923eF274Fe61C8318559EeC2D5c5492f",
-  oracle: process.env.MOLFI_ORACLE || "0xDaeBBa2A3A354E7677f5F005F0fCa0b24b8189B3",
+  market: process.env.MOLFI_MARKET || "0xD709773A1128c1160b292F505FAA8E3e8d0786fF",
+  escrow: process.env.MOLFI_ESCROW || "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
+  oracle: process.env.MOLFI_ORACLE || "0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099",
   fxrp: process.env.MOLFI_FXRP || "0x0b6A3645c240605887a5532109323A3E12273dc7",
 };
 

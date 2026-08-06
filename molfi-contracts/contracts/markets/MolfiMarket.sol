@@ -81,6 +81,8 @@ contract MolfiMarket {
     error BadOutcome();
     error BadFeed();
     error ZeroAddress();
+    /// @dev Admin tried to hand-settle an oracle market that FTSO can still settle.
+    error OracleSettlementAvailable();
 
     modifier onlyAdmin() {
         if (msg.sender != admin) revert NotAdmin();
@@ -177,12 +179,33 @@ contract MolfiMarket {
         emit Resolved(id, m.winningOutcome, price);
     }
 
-    /// Admin fallback resolution (for non-price markets or emergencies).
+    /// @notice How long after close an oracle-backed market must go unresolved
+    ///         before admin may settle it by hand.
+    /// @dev The escape hatch exists for a genuinely stuck feed. The delay is what
+    ///      makes it an escape hatch rather than an override.
+    uint64 public constant ADMIN_OVERRIDE_DELAY = 24 hours;
+
+    /// Admin fallback resolution.
+    ///
+    /// For markets with no oracle this is the normal path. For oracle-backed
+    /// markets it is an EMERGENCY ONLY path: admin must wait until the market is
+    /// both closed and `ADMIN_OVERRIDE_DELAY` past close, by which point anyone
+    /// could already have settled it permissionlessly from FTSO.
+    ///
+    /// Without that restriction the admin could hand-pick the winner of a live
+    /// price market — including before it closed — which would make "settled by
+    /// FTSOv2" untrue and every stake in the contract discretionary.
     function resolve(bytes32 id, uint32 outcome) external onlyAdmin {
         Market storage m = marketOf[id];
         if (!m.exists) revert Missing();
         if (outcome > 1) revert BadOutcome();
         if (m.status == Status.Resolved) revert AlreadyResolved();
+        if (m.hasOracle) {
+            if (block.timestamp < m.closeTs) revert NotClosed();
+            if (block.timestamp < m.closeTs + ADMIN_OVERRIDE_DELAY) {
+                revert OracleSettlementAvailable();
+            }
+        }
         m.winningOutcome = outcome;
         m.status = Status.Resolved;
         emit Resolved(id, outcome, 0);

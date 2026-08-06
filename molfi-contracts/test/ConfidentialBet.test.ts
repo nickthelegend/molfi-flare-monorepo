@@ -63,7 +63,7 @@ async function deploy() {
 describe("ConfidentialBet — hidden-side notes in FXRP", () => {
   describe("commit", () => {
     it("escrows exactly the fixed denomination and records the leaf", async () => {
-      const { cbet, token, alice } = await deploy();
+      const { cbet, token, alice, MKT } = await deploy();
       const before = await token.balanceOf(alice.address);
 
       await cbet.connect(alice).commit(1111n);
@@ -74,7 +74,7 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
     });
 
     it("assigns increasing leaf indices", async () => {
-      const { cbet, alice, bob } = await deploy();
+      const { cbet, alice, bob, MKT } = await deploy();
       await cbet.connect(alice).commit(1n);
       await cbet.connect(bob).commit(2n);
       await cbet.connect(alice).commit(3n);
@@ -84,7 +84,7 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
     });
 
     it("rejects a duplicate commitment (it would be unclaimable)", async () => {
-      const { cbet, alice, bob } = await deploy();
+      const { cbet, alice, bob, MKT } = await deploy();
       await cbet.connect(alice).commit(555n);
       // bob's funds would be taken for a note whose nullifier alice can spend.
       await expect(
@@ -93,7 +93,7 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
     });
 
     it("takes the same amount regardless of caller — size leaks nothing", async () => {
-      const { cbet, token, alice, bob } = await deploy();
+      const { cbet, token, alice, bob, MKT } = await deploy();
       const a0 = await token.balanceOf(alice.address);
       const b0 = await token.balanceOf(bob.address);
       await cbet.connect(alice).commit(10n);
@@ -105,21 +105,21 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
 
   describe("root registration", () => {
     it("only admin may checkpoint a root", async () => {
-      const { cbet, alice } = await deploy();
+      const { cbet, alice, MKT } = await deploy();
       await expect(
-        cbet.connect(alice).registerRoot(ROOT),
+        cbet.connect(alice).registerRoot(MKT, ROOT),
       ).to.be.revertedWithCustomError(cbet, "NotAdmin");
 
-      await cbet.registerRoot(ROOT);
-      expect(await cbet.knownRoot(ROOT)).to.equal(true);
+      await cbet.registerRoot(MKT, ROOT);
+      expect(await cbet.knownRoot(MKT, ROOT)).to.equal(true);
     });
   });
 
   describe("claim", () => {
     it("pays 2x the denomination on a valid winning proof", async () => {
-      const { cbet, token, alice, settle } = await deploy();
+      const { cbet, token, alice, settle, MKT } = await deploy();
       await cbet.connect(alice).commit(1n);
-      await cbet.registerRoot(ROOT);
+      await cbet.registerRoot(MKT, ROOT);
       await settle("3.42");
 
       const before = await token.balanceOf(alice.address);
@@ -132,9 +132,9 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
     });
 
     it("injects the RESOLVED winner as the outcome signal, not the caller's claim", async () => {
-      const { cbet, verifier, alice, oracle, market, settle } = await deploy();
+      const { cbet, verifier, alice, oracle, market, settle, MKT } = await deploy();
       await cbet.connect(alice).commit(1n);
-      await cbet.registerRoot(ROOT);
+      await cbet.registerRoot(MKT, ROOT);
       await settle("2.10"); // price < 3 → NO wins (outcome 1)
 
       expect(await market.winningOutcome(id("xrp-conf"))).to.equal(1n);
@@ -154,9 +154,9 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
     });
 
     it("binds the recipient into the proof so a claim can't be re-pointed", async () => {
-      const { cbet, verifier, alice, bob, settle } = await deploy();
+      const { cbet, verifier, alice, bob, settle, MKT } = await deploy();
       await cbet.connect(alice).commit(1n);
-      await cbet.registerRoot(ROOT);
+      await cbet.registerRoot(MKT, ROOT);
       await settle("3.42");
 
       // Proof was minted for alice.
@@ -172,9 +172,9 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
     });
 
     it("rejects a replayed nullifier", async () => {
-      const { cbet, alice, settle } = await deploy();
+      const { cbet, alice, settle, MKT } = await deploy();
       await cbet.connect(alice).commit(1n);
-      await cbet.registerRoot(ROOT);
+      await cbet.registerRoot(MKT, ROOT);
       await settle("3.42");
 
       await cbet.connect(alice).claim(id("xrp-conf"), A, B, C, ROOT, 77n, alice.address);
@@ -184,7 +184,7 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
     });
 
     it("rejects an unregistered root", async () => {
-      const { cbet, alice, settle } = await deploy();
+      const { cbet, alice, settle, MKT } = await deploy();
       await cbet.connect(alice).commit(1n);
       await settle("3.42");
       await expect(
@@ -193,18 +193,18 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
     });
 
     it("rejects a claim before the market resolves", async () => {
-      const { cbet, alice } = await deploy();
+      const { cbet, alice, MKT } = await deploy();
       await cbet.connect(alice).commit(1n);
-      await cbet.registerRoot(ROOT);
+      await cbet.registerRoot(MKT, ROOT);
       await expect(
         cbet.connect(alice).claim(id("xrp-conf"), A, B, C, ROOT, 1n, alice.address),
       ).to.be.revertedWithCustomError(cbet, "NotResolved");
     });
 
     it("rejects an invalid proof without burning the nullifier", async () => {
-      const { cbet, verifier, alice, settle } = await deploy();
+      const { cbet, verifier, alice, settle, MKT } = await deploy();
       await cbet.connect(alice).commit(1n);
-      await cbet.registerRoot(ROOT);
+      await cbet.registerRoot(MKT, ROOT);
       await settle("3.42");
       await verifier.setResult(false);
 
@@ -215,9 +215,9 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
     });
 
     it("rejects a zero recipient", async () => {
-      const { cbet, alice, settle } = await deploy();
+      const { cbet, alice, settle, MKT } = await deploy();
       await cbet.connect(alice).commit(1n);
-      await cbet.registerRoot(ROOT);
+      await cbet.registerRoot(MKT, ROOT);
       await settle("3.42");
       await expect(
         cbet.connect(alice).claim(id("xrp-conf"), A, B, C, ROOT, 1n, ethers.ZeroAddress),
@@ -250,7 +250,7 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
 
       // Only one denom in the pool, but a claim needs 2x.
       await cbet.connect(alice).commit(1n);
-      await cbet.registerRoot(ROOT);
+      await cbet.registerRoot(MKT, ROOT);
       await time.increaseTo(close + 1);
       await oracle.setPrice(XRP_USD, usd("4"));
       await market.resolveFromOracle(MKT);
@@ -263,7 +263,7 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
 
   describe("poolStatus", () => {
     it("reports how many claims the pool can cover", async () => {
-      const { cbet } = await deploy();
+      const { cbet, MKT } = await deploy();
       const s = await cbet.poolStatus();
       // Seeded with 1000 FXRP; each claim costs 2 → 500 claims.
       expect(s.balance).to.equal(fxrp("1000"));
@@ -291,5 +291,42 @@ describe("ConfidentialBet — hidden-side notes in FXRP", () => {
         ),
       ).to.be.revertedWithCustomError(F, "ZeroDenom");
     });
+  });
+});
+
+describe("ConfidentialBet — cross-market claim regression", () => {
+  it("REJECTS a note claimed against a market it was not registered for", async () => {
+    // The circuit's public signals carry no market id. With one global root
+    // set, a note backing the LOSING side of market A verifies against market B
+    // whose winner happens to match. Roots are scoped per market to stop that.
+    const { cbet, market, oracle, alice, MKT } = await deploy();
+    await cbet.connect(alice).commit(1n);
+
+    // Root is checkpointed for MKT only.
+    await cbet.registerRoot(MKT, ROOT);
+
+    // A second market that resolves the other way.
+    const OTHER = id("other-market");
+    const close2 = (await time.latest()) + DAY;
+    await market.createPriceMarket(
+      OTHER, "other", close2, XRP_USD, usd("3"), 0, DAY * 2,
+    );
+    await time.increaseTo(close2 + 1);
+    await oracle.setPrice(XRP_USD, usd("4"));
+    await market.resolveFromOracle(OTHER);
+
+    await expect(
+      cbet.connect(alice).claim(OTHER, A, B, C, ROOT, 1n, alice.address),
+    ).to.be.revertedWithCustomError(cbet, "UnknownRoot");
+  });
+
+  it("accepts the same root for the market it WAS registered for", async () => {
+    const { cbet, alice, MKT, settle } = await deploy();
+    await cbet.connect(alice).commit(1n);
+    await cbet.registerRoot(MKT, ROOT);
+    await settle("3.42");
+    await expect(
+      cbet.connect(alice).claim(MKT, A, B, C, ROOT, 1n, alice.address),
+    ).to.not.be.reverted;
   });
 });

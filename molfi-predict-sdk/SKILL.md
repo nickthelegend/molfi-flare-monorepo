@@ -52,10 +52,10 @@ all five steps live on Coston2 and prints the Coston2 explorer transactions. It 
 `molfi-circuits/build/confidential_bet/`.
 
 ## Contracts (Coston2 · chainId 114)
-- `MolfiMarket` `0x6a9bC905c9ba5976BBaE19A92B6Fc032Ff0233FC` — FTSOv2-resolved markets (enumerable)
-- `PredictEscrow` `0x220BB958923eF274Fe61C8318559EeC2D5c5492f` — real-FXRP pari-mutuel + ZK-gated bets
-- `ConfidentialBet` `0xde2C0105DC046bd428E68d425ad6177507f64BBE` — hidden-side bets + ZK claim
-- Groth16 verifier `0x7a6995201d02bE66a2394587Dc31E72818ca2365`
+- `MolfiMarket` `0xD709773A1128c1160b292F505FAA8E3e8d0786fF` — FTSOv2-resolved markets (enumerable)
+- `PredictEscrow` `0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865` — real-FXRP pari-mutuel + ZK-gated bets
+- `ConfidentialBet` `0xd765Fa0886FD534A176190828fc4A47c8C3Fbfd0` — hidden-side bets + ZK claim
+- Groth16 verifier `0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5`
 - `FXRP` `0x0b6A3645c240605887a5532109323A3E12273dc7`
-- `FtsoOracle` `0xDaeBBa2A3A354E7677f5F005F0fCa0b24b8189B3` — reads FTSOv2, normalized to 18 decimals
+- `FtsoOracle` `0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099` — reads FTSOv2, normalized to 18 decimals
 - FTSOv2 feed ids (bytes21, not addresses): XRP/USD `0x015852502f55534400000000000000000000000000` · FLR/USD `0x01464c522f55534400000000000000000000000000`

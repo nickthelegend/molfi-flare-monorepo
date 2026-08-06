@@ -3,17 +3,17 @@
   "chainId": 114,
   "rpc": "https://coston2-api.flare.network/ext/C/rpc",
   "explorer": "https://coston2-explorer.flare.network",
-  "deployedAt": "2026-08-05T20:31:04.025Z",
-  "deployer": "0x2904Ea643BaBDd278daBB817045fA463f3388Feb",
+  "deployedAt": "2026-08-06T04:06:28.475Z",
+  "deployer": "0x667F089798505f086e1a3BfB340E14d4cB77B7fb",
   "fxrp": "0x0b6A3645c240605887a5532109323A3E12273dc7",
   "fxrpDecimals": 6,
   "confDenom": "1000000",
   "contracts": {
-    "ftsoOracle": "0xDaeBBa2A3A354E7677f5F005F0fCa0b24b8189B3",
-    "confidentialBetVerifier": "0x7a6995201d02bE66a2394587Dc31E72818ca2365",
-    "molfiMarket": "0x6a9bC905c9ba5976BBaE19A92B6Fc032Ff0233FC",
-    "predictEscrow": "0x220BB958923eF274Fe61C8318559EeC2D5c5492f",
-    "confidentialBet": "0xde2C0105DC046bd428E68d425ad6177507f64BBE"
+    "ftsoOracle": "0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099",
+    "confidentialBetVerifier": "0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5",
+    "molfiMarket": "0xD709773A1128c1160b292F505FAA8E3e8d0786fF",
+    "predictEscrow": "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
+    "confidentialBet": "0xd765Fa0886FD534A176190828fc4A47c8C3Fbfd0"
   },
   "feeds": {
     "XRP/USD": "0x015852502f55534400000000000000000000000000",
