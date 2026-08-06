@@ -12,7 +12,8 @@ export const ui = {
   tabMarkets: "Markets",
   tabPortfolio: "Portfolio",
   tabPoints: "Points",
-  connectHint: "Demo network · Google sign-in",
+  // There is no Google sign-in — that was Enoki (Sui). Molfi connects an EVM wallet.
+  connectHint: "Flare Coston2 testnet · connect an EVM wallet",
   priceNow: "Price now",
   markPrice: "Current price",
   priceChart: "Price chart",

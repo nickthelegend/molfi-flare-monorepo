@@ -13,7 +13,7 @@ export const Route = createFileRoute("/_app/leaderboard")({
   head: () => ({
     meta: [
       { title: pageTitle("Leaderboard") },
-      { name: "description", content: "Top Molfi traders by realized PnL — positions stay private." },
+      { name: "description", content: "Top Molfi traders by realized PnL, settled on-chain by FTSOv2." },
     ],
   }),
   component: LeaderboardPage,
@@ -40,8 +40,10 @@ function LeaderboardPage() {
         </h1>
         <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
           <ShieldCheck className="h-4 w-4 text-accent" />
-          Ranked by realized PnL. Individual positions stay private (zero-knowledge) — only
-          aggregate results are public.
+          {/* Ordinary stakes are public on-chain; only a confidential bet hides
+              a side. Claiming blanket privacy here was simply untrue. */}
+          Ranked by realized PnL, from Bet and Redeem events on PredictEscrow. Ordinary stakes
+          are public on-chain; a confidential bet hides its side, so it lands here unattributed.
         </p>
       </div>
 

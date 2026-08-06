@@ -31,7 +31,7 @@ function PortfolioPage() {
         <div>
           <h1 className={pageSimpleTitle}>Portfolio</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Your bets, live indicative P&amp;L, and settled results — private to you.
+            Your bets, live indicative P&amp;L, and settled results — read straight from Coston2.
           </p>
         </div>
         {isWalletConnected && address ? (

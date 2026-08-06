@@ -69,7 +69,8 @@ export function GuideStorybook() {
             <h1 className="guide-hero-title">How Molfi works</h1>
             <p className="guide-hero-lead">
               Bet on real-world outcomes — will it happen, or not? Pick YES or NO and win if
-              you&apos;re right. Your position stays private, and every market settles on-chain.
+              you&apos;re right. Every market settles on-chain from FTSOv2, and you can optionally
+              hide which side you backed.
             </p>
           </div>
           <Link to="/markets" className="guide-hero-cta">
@@ -230,7 +231,7 @@ export function GuideStorybook() {
               <PillarCard
                 icon={<Eye className="h-4 w-4" />}
                 title="Verifiable, not exposed"
-                body="Settlement is proven on-chain with zero-knowledge — private to you, provable to everyone."
+                body="A confidential bet commits your side as a hash and proves it with Groth16 — hidden from everyone, still provable to the contract."
                 accent="long"
               />
             </div>

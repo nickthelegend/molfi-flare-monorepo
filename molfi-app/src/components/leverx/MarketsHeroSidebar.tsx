@@ -21,7 +21,7 @@ export function MarketsHeroSidebar({ className }: Props) {
       <MarketsHeroPromoCard
         badge="ZK"
         imageSrc={aiBannerBg}
-        title="Your position stays private"
+        title="Hide your side, optionally"
         description="Commitments and nullifiers keep your bets confidential, proven with zero-knowledge."
         ctaLabel="Learn how"
         to="/guide"

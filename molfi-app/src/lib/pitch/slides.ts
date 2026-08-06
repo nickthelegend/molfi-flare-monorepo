@@ -38,7 +38,7 @@ export const PITCH_SLIDES: PitchSlide[] = [
     id: "cover",
     eyebrow: "Private prediction markets · Flare",
     title: "Molfi",
-    body: "Bet on real-world outcomes — your side stays private, proven with zero-knowledge.",
+    body: "Bet on real-world outcomes in FXRP. Settled by FTSOv2 — and you can hide which side you took with a zero-knowledge proof.",
     pattern: "grid",
     illustration: "cover",
   },

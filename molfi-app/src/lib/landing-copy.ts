@@ -37,7 +37,7 @@ export const landingCopy = {
   marketsCta: "Browse markets",
 
   orderbookEyebrow: "Privacy",
-  orderbookTitle: "Your position stays private",
+  orderbookTitle: "Hide your side, optionally",
   orderbookLead:
     "Positions are committed on-chain and proven with zero-knowledge. The order book shows real market depth without revealing who holds what.",
   orderbookBullets: [
