@@ -10,6 +10,7 @@
     "open": "node scripts/open-market.mjs"
   },
   "dependencies": {
-    "viem": "^2.21.0"
+    "viem": "^2.21.0",
+    "xrpl": "^5.0.0"
   }
 }

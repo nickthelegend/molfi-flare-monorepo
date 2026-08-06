@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@flarenetwork/flare-periphery-contracts": "^0.1.52",
-    "@openzeppelin/contracts": "^5.1.0"
+    "@openzeppelin/contracts": "^5.1.0",
+    "xrpl": "^5.0.0"
   }
 }

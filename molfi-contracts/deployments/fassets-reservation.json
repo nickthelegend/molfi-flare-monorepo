@@ -1,0 +1,17 @@
+{
+  "assetManager": "0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA",
+  "collateralReservationId": "47051525",
+  "agentVault": "0xd5dEFe2c62D48788BB3889534FBFe7Aea0602D64",
+  "minter": "0xBDAAda2753e52e3c35A63bB0aB82fE8922f5C1e1",
+  "valueUBA": "10000000",
+  "feeUBA": "25000",
+  "totalUBA": "10025000",
+  "totalXRP": "10.025",
+  "paymentAddress": "rDEXUmuYAe9MCxVfoWArptSZNQPjKpRCXd",
+  "paymentReference": "0x4642505266410001000000000000000000000000000000000000000002cdf305",
+  "firstUnderlyingBlock": "19692537",
+  "lastUnderlyingBlock": "19693083",
+  "lastUnderlyingTimestamp": "1786054855",
+  "reservedAt": "2026-08-06T22:09:00.701Z",
+  "txHash": "0x044111b56142060e15427bc896cbbd3bb283c40e1f79da7ffdfe01f8ecbe9f74"
+}
