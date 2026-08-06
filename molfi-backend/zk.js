@@ -11,6 +11,7 @@
 import { groth16 } from "snarkjs";
 import { randomBytes, createHash } from "node:crypto";
 import { keccak256, encodeAbiParameters } from "viem";
+import { planStake, describePlan, summarizePlan } from "./stake-plan.js";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 
@@ -160,3 +161,33 @@ export async function proveNote(note, recipient) {
     publicSignals,
   };
 }
+
+/**
+ * Build the notes for an ARBITRARY stake amount.
+ *
+ * Returns one note per standard denomination the amount decomposes into, each
+ * independently claimable. The caller escrows the total in a single
+ * `commitBatch`, and claims note by note afterwards.
+ */
+export function prepareCommitBatch(side, marketId, amount) {
+  const notes = planStake(amount, CONF_DENOMS);
+  if (notes.length > 40) {
+    throw new Error(
+      `${amount} FXRP needs ${notes.length} notes, over the 40-note batch cap — ` +
+        `round to a larger denomination.`,
+    );
+  }
+  const prepared = notes.map((tier) => prepareCommit(side, marketId, tier));
+  return {
+    marketId,
+    side: prepared[0].side,
+    amount: Number(amount),
+    payout: Number(amount) * CONF_PAYOUT_MULT,
+    noteCount: prepared.length,
+    plan: summarizePlan(notes, CONF_DENOMS),
+    planLabel: describePlan(notes, CONF_DENOMS),
+    notes: prepared,
+  };
+}
+
+export { planStake, describePlan, summarizePlan };

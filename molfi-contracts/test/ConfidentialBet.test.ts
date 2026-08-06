@@ -416,3 +416,80 @@ describe("ConfidentialBet — denomination tiers", () => {
     ).to.be.revertedWithCustomError(cbet, "MarketClosed");
   });
 });
+
+describe("ConfidentialBet — arbitrary stake via commitBatch", () => {
+  it("escrows an arbitrary total in ONE transfer", async () => {
+    const { cbet, token, alice, MKT } = await deploy();
+    const before = await token.balanceOf(alice.address);
+
+    // 137 FXRP = 1x100 + 3x10 + 7x1 — the decomposition the client computes.
+    const tiers = [2, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0];
+    const notes = tiers.map((_, i) => BigInt(9000 + i));
+    const expected = DENOMS[2] + DENOMS[1] * 3n + DENOMS[0] * 7n;
+
+    const tx = await cbet.connect(alice).commitBatch(MKT, tiers, notes);
+    const receipt = await tx.wait();
+
+    expect(before - (await token.balanceOf(alice.address))).to.equal(expected);
+    expect(await cbet.commitmentCount()).to.equal(BigInt(tiers.length));
+
+    // One Transfer, not eleven — the deposit reads as a single amount.
+    const transfers = receipt!.logs.filter(
+      (l) => l.address.toLowerCase() === (token.target as string).toLowerCase(),
+    );
+    expect(transfers.length).to.equal(1);
+
+    // …but one Commit per note, each carrying its own tier.
+    expect(await cbet.committedByTier(2)).to.equal(DENOMS[2]);
+    expect(await cbet.committedByTier(1)).to.equal(DENOMS[1] * 3n);
+    expect(await cbet.committedByTier(0)).to.equal(DENOMS[0] * 7n);
+  });
+
+  it("each note of a batch claims independently, at its own tier", async () => {
+    const { cbet, token, alice, settle, MKT } = await deploy();
+    await cbet.connect(alice).commitBatch(MKT, [1, 0], [7001n, 7002n]);
+    await cbet.registerRoot(MKT, 1, ROOT);
+    await cbet.registerRoot(MKT, 0, ROOT);
+    await settle("3.50");
+
+    const before = await token.balanceOf(alice.address);
+    await cbet.connect(alice).claim(MKT, 1, A, B, C, ROOT, 1n, alice.address);
+    expect(await token.balanceOf(alice.address)).to.equal(before + DENOMS[1] * 2n);
+
+    await cbet.connect(alice).claim(MKT, 0, A, B, C, ROOT, 2n, alice.address);
+    expect(await token.balanceOf(alice.address)).to.equal(
+      before + DENOMS[1] * 2n + DENOMS[0] * 2n,
+    );
+  });
+
+  it("rejects a malformed or oversized batch", async () => {
+    const { cbet, alice, MKT } = await deploy();
+    await expect(
+      cbet.connect(alice).commitBatch(MKT, [], []),
+    ).to.be.revertedWithCustomError(cbet, "EmptyBatch");
+    await expect(
+      cbet.connect(alice).commitBatch(MKT, [0, 1], [1n]),
+    ).to.be.revertedWithCustomError(cbet, "LengthMismatch");
+
+    const big = Array.from({ length: 41 }, () => 0);
+    await expect(
+      cbet.connect(alice).commitBatch(MKT, big, big.map((_, i) => BigInt(5000 + i))),
+    ).to.be.revertedWithCustomError(cbet, "BatchTooLarge");
+  });
+
+  it("rejects a batch that repeats a commitment", async () => {
+    // Both notes would share a nullifier, so the second could never be claimed.
+    const { cbet, alice, MKT } = await deploy();
+    await expect(
+      cbet.connect(alice).commitBatch(MKT, [0, 0], [42n, 42n]),
+    ).to.be.revertedWithCustomError(cbet, "DuplicateCommitment");
+  });
+
+  it("REJECTS a batch after the market has closed", async () => {
+    const { cbet, alice, MKT, close } = await deploy();
+    await time.increaseTo(close + 1);
+    await expect(
+      cbet.connect(alice).commitBatch(MKT, [0], [1n]),
+    ).to.be.revertedWithCustomError(cbet, "MarketClosed");
+  });
+});

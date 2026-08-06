@@ -25,9 +25,10 @@ import {
   escrowRedeem,
   escrowPosition,
   escrowPool,
-  confidentialCommit,
+  confidentialCommitBatch,
   confidentialClaim,
 } from "@/lib/stellar/soroban";
+import { planStake, describePlan } from "@/lib/confidential/stake-plan";
 import {
   CONTRACTS,
   CONF_TIERS_FXRP,
@@ -44,7 +45,7 @@ import {
   fetchOnChainMarket,
   fetchPositions,
   fetchZkProof,
-  fetchConfidentialNote,
+  fetchConfidentialStake,
   fetchConfidentialClaim,
   isBackendMarketId,
   placeBet,
@@ -717,9 +718,9 @@ function OnChainDetail({ id }: { id: string }) {
   const [confidential, setConfidential] = useState(false);
   const [confNotes, setConfNotes] = useState<StoredConfNote[]>([]);
   const [confBusy, setConfBusy] = useState<string | null>(null); // "commit" | nullifier | null
-  /** Which denomination tier a confidential bet uses. Each tier is its own
-   *  anonymity set, so this is a real privacy choice, not just a size. */
-  const [confTier, setConfTier] = useState(0);
+  /** Free-form confidential stake. Decomposed into standard notes below, so
+   *  the user picks any number while each note stays in a uniform pool. */
+  const [confAmount, setConfAmount] = useState("10");
 
   const marketQuery = useQuery({
     queryKey: ["onchain-market", id],
@@ -753,6 +754,17 @@ function OnChainDetail({ id }: { id: string }) {
     refetchInterval: 12_000,
   });
 
+  // Decompose the typed amount locally so the ticket can show what will
+  // actually be committed before anything is signed.
+  const confPlan = (() => {
+    try {
+      const notes = planStake(confAmount, CONF_TIERS_FXRP);
+      return { notes, label: describePlan(notes, CONF_TIERS_FXRP), error: null as string | null };
+    } catch (e) {
+      return { notes: [], label: "", error: e instanceof Error ? e.message : "invalid amount" };
+    }
+  })();
+
   const commentsState = useMarketComments(id);
 
   const refresh = async () => {
@@ -775,25 +787,37 @@ function OnChainDetail({ id }: { id: string }) {
     setConfBusy("commit");
     try {
       const sideStr = side === OUTCOME.YES ? "YES" : "NO";
-      const prep = await fetchConfidentialNote(sideStr, id, confTier);
-      const hash = await confidentialCommit(address, id, confTier, prep.commitment);
-      setConfNotes(
-        addConfNote(id, address, {
-          ...prep.note,
-          commitment: prep.commitment,
-          side: prep.side,
-          tier: prep.tier,
-          denom: prep.denom,
+      const plan = await fetchConfidentialStake(sideStr, id, Number(confAmount));
+      const hash = await confidentialCommitBatch(
+        address,
+        id,
+        plan.notes.map((n) => n.tier),
+        plan.notes.map((n) => n.commitment),
+      );
+      // Every note is stored — each one is independently claimable, and losing
+      // any of them loses that slice of the stake.
+      let stored = confNotes;
+      for (const n of plan.notes) {
+        stored = addConfNote(id, address, {
+          ...n.note,
+          commitment: n.commitment,
+          side: n.side,
+          tier: n.tier,
+          denom: n.denom,
           committedTx: hash,
           committedAt: Date.now(),
-        }),
+        });
+      }
+      setConfNotes(stored);
+      showTxSuccess(
+        `🔒 Confidential bet · ${plan.amount} FXRP as ${plan.noteCount} note${plan.noteCount === 1 ? "" : "s"} (${plan.planLabel}) — side hidden`,
+        hash,
       );
-      showTxSuccess(`🔒 Confidential bet placed · ${prep.denom} FXRP (side hidden)`, hash);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Confidential bet failed";
       showError(
         /balance|insufficient/i.test(msg)
-          ? `Need ${CONF_TIERS_FXRP[confTier]} FXRP — use the faucet first.`
+          ? `Need ${confAmount} FXRP — use the faucet first.`
           : msg,
       );
     } finally {
@@ -1090,50 +1114,60 @@ function OnChainDetail({ id }: { id: string }) {
                 {confidential ? (
                   <>
                     <div className="space-y-1.5">
-                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                        Stake size
-                      </span>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {CONF_TIERS_FXRP.map((amount, tier) => (
+                      <label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Stake (FXRP)
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={confAmount}
+                        onChange={(e) => setConfAmount(e.target.value)}
+                        className="border-border bg-background font-mono"
+                      />
+                      <div className="flex gap-1.5">
+                        {[10, 50, 137, 500].map((preset) => (
                           <button
-                            key={tier}
+                            key={preset}
                             type="button"
-                            onClick={() => setConfTier(tier)}
-                            className={cn(
-                              "rounded-lg py-2 font-mono text-xs font-semibold transition",
-                              tier === confTier
-                                ? "bg-accent/15 text-accent ring-2 ring-accent/40"
-                                : "border border-border text-muted-foreground hover:text-foreground",
-                            )}
+                            onClick={() => setConfAmount(String(preset))}
+                            className="flex-1 rounded-md border border-border py-1 font-mono text-[10px] text-muted-foreground transition hover:text-foreground"
                           >
-                            {amount >= 1000 ? `${amount / 1000}k` : amount}
+                            {preset}
                           </button>
                         ))}
                       </div>
-                      {/* The size is public either way — it moves through
-                          transferFrom. What the fixed sizes buy is that your
-                          payout can't be matched to your deposit, and that only
-                          holds against others who chose the same one. */}
-                      <p className="text-[10px] leading-snug text-muted-foreground">
-                        Each size is a separate anonymity set — you blend in with everyone who
-                        picked the same one, so a busier tier hides you better.
-                      </p>
+                      {/* Show the decomposition BEFORE signing. The amount is
+                          free-form, but what gets committed is standard notes —
+                          the user should see exactly which. */}
+                      {confPlan.error ? (
+                        <p className="text-[10px] text-destructive">{confPlan.error}</p>
+                      ) : (
+                        <p className="text-[10px] leading-snug text-muted-foreground">
+                          Committed as{" "}
+                          <span className="font-mono text-foreground">{confPlan.notes.length}</span>{" "}
+                          note{confPlan.notes.length === 1 ? "" : "s"} ·{" "}
+                          <span className="font-mono">{confPlan.label}</span>. Each note claims
+                          separately against others of the same size, which is what keeps your
+                          payout unlinkable from your deposit.
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center justify-between rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs">
                       <span className="text-muted-foreground">Stake · side hidden</span>
                       <span className="font-mono font-semibold text-foreground">
-                        {CONF_TIERS_FXRP[confTier]} FXRP
+                        {confPlan.error ? "—" : `${Number(confAmount)} FXRP`}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Payout if your side wins</span>
                       <span className="font-mono text-foreground">
-                        {CONF_TIERS_FXRP[confTier] * CONF_PAYOUT_MULT} FXRP
+                        {confPlan.error ? "—" : `${Number(confAmount) * CONF_PAYOUT_MULT} FXRP`}
                       </span>
                     </div>
                     <Button
                       onClick={handleConfidentialBet}
-                      disabled={confBusy === "commit"}
+                      disabled={confBusy === "commit" || Boolean(confPlan.error)}
                       className="w-full gap-1.5"
                       size="lg"
                     >

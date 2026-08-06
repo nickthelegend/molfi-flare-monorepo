@@ -8,7 +8,8 @@ import {
 import { formatAssetPriceUsdWithSymbol } from "@/lib/leverx/format-asset-price";
 
 export const ui = {
-  appTagline: "Leveraged trading on price predictions",
+  // Molfi is pari-mutuel, not leveraged — there is no margin and no liquidation.
+  appTagline: "XRP-settled prediction markets on Flare",
   tabMarkets: "Markets",
   tabPortfolio: "Portfolio",
   tabPoints: "Points",

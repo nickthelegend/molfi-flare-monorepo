@@ -104,10 +104,17 @@ function oracleAssetLabel(oracleId: string): string {
   return oracleId.slice(2, 6).toUpperCase() || "MKT";
 }
 
+/**
+ * Fallback titles when a row carries no question of its own.
+ *
+ * These were the LeverX constant "Bitcoin Up, Down, or Range", which rendered
+ * on every Molfi market regardless of asset. Molfi rows always have a real
+ * question, so this should only ever appear while one is loading.
+ */
 export const MARKET_TITLES = {
-  up: "Bitcoin Up, Down, or Range",
-  down: "Bitcoin Up, Down, or Range",
-  range: "Bitcoin Up, Down, or Range",
+  up: "Price market",
+  down: "Price market",
+  range: "Price market",
 } as const;
 
 export const MARKET_TITLE_UP = MARKET_TITLES.up;

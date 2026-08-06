@@ -39,20 +39,29 @@ interface IMolfiMarket {
 /// backed the *winning* side and collect — without revealing which note was
 /// yours or which side you took.
 ///
-/// @dev WHY TIERS RATHER THAN AN ARBITRARY AMOUNT.
-///      The stake amount was never the secret — it moves through `transferFrom`,
-///      so it is public either way. What the fixed size actually buys is
-///      UNLINKABILITY: if every deposit in a pool is exactly 10 FXRP and every
-///      payout exactly 20, a payout cannot be tied back to a particular deposit.
-///      Allow arbitrary amounts and that collapses immediately — a 7.3 FXRP
-///      deposit is the only thing that could produce a 14.6 FXRP payout, so the
-///      proof hides the side while the arithmetic reveals the depositor.
+/// @dev ARBITRARY STAKE AMOUNTS, VIA NOTES.
+///      Stake whatever you like — 137 FXRP, 6, 1042. `commitBatch` takes a list
+///      of notes and escrows their total in one transfer, so the amount a user
+///      chooses is genuinely free-form.
 ///
-///      Tiers keep the property and drop the straitjacket: pick a size, and you
-///      are anonymous among everyone who picked the same one. Each tier is its
-///      own anonymity set, which is also why `poolStatus` reports them
-///      separately — a tier with one participant hides nothing, and the UI
-///      should say so rather than imply otherwise.
+///      What it is NOT is one note of 137. The stake amount was never the
+///      secret — it moves through `transferFrom` and is public either way —
+///      so the only thing a fixed size buys is UNLINKABILITY: when every note in
+///      a pool is 10 and every payout 20, a payout cannot be tied back to a
+///      particular deposit. A single 137 note would be the only thing on earth
+///      that could produce a 274 payout, so the proof would hide the side while
+///      the arithmetic handed over the depositor.
+///
+///      So an arbitrary amount is decomposed into standard notes, exactly the
+///      way cash is: 137 = 1x100 + 3x10 + 7x1. Each note claims independently
+///      into a pool of identical notes. The user picks any number; the protocol
+///      still only ever sees standard ones.
+///
+///      RESIDUAL LEAK, stated plainly: the multiset of tiers in a deposit is
+///      visible, so an unusual total is more identifying than a round one, and
+///      claiming every note of a deposit in one block re-links them. `poolStatus`
+///      reports per-tier depth so the UI can say how much cover a tier actually
+///      offers instead of implying anonymity it does not have.
 ///
 ///      HOW A TIER IS BOUND. `claim` cannot take the tier on trust: a note
 ///      committed at 1 FXRP must not be claimable at 1000. The tier is folded
@@ -94,6 +103,12 @@ contract ConfidentialBet is ReentrancyGuard {
     uint256[] private _denoms;
 
     uint256 public constant PAYOUT_MULT = 2; // even-odds binary payout
+
+    /// @notice Cap on notes per `commitBatch`. With a 1/10/100/1000 ladder the
+    ///         worst honest decomposition of any amount below 10,000 is 27
+    ///         notes, so this leaves headroom without letting a batch grow
+    ///         unboundedly.
+    uint256 public constant MAX_NOTES_PER_BATCH = 40;
 
     address public admin;
 
@@ -147,6 +162,9 @@ contract ConfidentialBet is ReentrancyGuard {
     error MarketClosed();
     error InsufficientPool(uint256 needed, uint256 available);
     error DuplicateCommitment();
+    error EmptyBatch();
+    error LengthMismatch();
+    error BatchTooLarge(uint256 n);
 
     modifier onlyAdmin() {
         if (msg.sender != admin) revert NotAdmin();
@@ -209,24 +227,63 @@ contract ConfidentialBet is ReentrancyGuard {
 
     // ── commit ───────────────────────────────────────────────────────────────
 
-    /// Escrow `denomOf(tier)` FXRP against a hidden-side note. Returns the leaf
-    /// index (position in the off-chain Poseidon tree).
+    /// @notice Escrow an ARBITRARY total against a list of standard notes.
+    ///
+    /// @dev This is the entry point the UI uses. The caller picks any amount;
+    ///      the client decomposes it (see `planStake` in the app/backend) and
+    ///      passes the resulting notes here. The total moves in ONE transfer —
+    ///      cheaper, and it means the deposit shows as a single amount rather
+    ///      than a telltale run of identical transfers.
+    ///
+    /// @param tiers       one entry per note, indexing the denomination ladder
+    /// @param commitments_ one entry per note, same order
+    /// @return firstIndex leaf index of the first note; the rest follow it
+    function commitBatch(
+        bytes32 marketId,
+        uint256[] calldata tiers,
+        uint256[] calldata commitments_
+    ) external nonReentrant returns (uint256 firstIndex) {
+        uint256 n = tiers.length;
+        if (n == 0) revert EmptyBatch();
+        if (n != commitments_.length) revert LengthMismatch();
+        // Bounded so a batch cannot run out of gas mid-loop and so the leak
+        // surface (note count) stays small.
+        if (n > MAX_NOTES_PER_BATCH) revert BatchTooLarge(n);
+
+        _requireOpen(marketId);
+
+        uint256 total;
+        firstIndex = commitments.length;
+        for (uint256 i = 0; i < n; i++) {
+            uint256 amount = denomOf(tiers[i]);
+            uint256 c = commitments_[i];
+            // A repeated commitment shares a nullifier with the original note,
+            // so the second depositor could never claim — reject rather than
+            // take funds for an unclaimable position. Checked across the batch
+            // too, since a caller could pass the same commitment twice.
+            if (_commitmentSeen[c]) revert DuplicateCommitment();
+            _commitmentSeen[c] = true;
+
+            total += amount;
+            committedByTier[tiers[i]] += amount;
+            emit Commit(commitments.length, marketId, tiers[i], c, amount);
+            commitments.push(c);
+        }
+
+        // One transfer for the whole stake, not one per note.
+        collateral.safeTransferFrom(msg.sender, address(this), total);
+    }
+
+    /// Escrow `denomOf(tier)` FXRP against a single hidden-side note. Returns
+    /// the leaf index (position in the off-chain Poseidon tree).
     function commit(
         bytes32 marketId,
         uint256 tier,
         uint256 commitment
     ) external nonReentrant returns (uint256 index) {
         uint256 amount = denomOf(tier);
+        _requireOpen(marketId);
 
-        // Committing after close would let someone read the settled outcome and
-        // then buy a certain win. The escrow enforces the same rule for open
-        // bets; a confidential bet must not be the way around it.
-        (, uint64 closeTs, , ) = market.getMarket(marketId);
-        if (block.timestamp >= closeTs) revert MarketClosed();
-
-        // A repeated commitment shares a nullifier with the original note, so
-        // the second depositor could never claim — reject rather than take
-        // funds for an unclaimable position.
         if (_commitmentSeen[commitment]) revert DuplicateCommitment();
         _commitmentSeen[commitment] = true;
 
@@ -235,6 +292,14 @@ contract ConfidentialBet is ReentrancyGuard {
         index = commitments.length;
         commitments.push(commitment);
         emit Commit(index, marketId, tier, commitment, amount);
+    }
+
+    /// @dev Committing after close would let someone read the settled outcome
+    ///      and then buy a certain win. The escrow enforces the same rule for
+    ///      open bets; a confidential bet must not be the way around it.
+    function _requireOpen(bytes32 marketId) internal view {
+        (, uint64 closeTs, , ) = market.getMarket(marketId);
+        if (block.timestamp >= closeTs) revert MarketClosed();
     }
 
     /// Operator checkpoints a Poseidon root computed off-chain from the

@@ -38,7 +38,7 @@ export const CONTRACTS = {
   /** confidential-bet — hidden-side commitment notes + on-chain ZK claim. */
   confidentialBet:
     (import.meta.env.VITE_CONF_BET_CONTRACT_ID as string | undefined) ??
-    "0x19679CceD8EF85096e779A5D7685505bE4D9bDB7",
+    "0x1e5e41cbC1e6FB96635DBc3191A03d8CC970ba99",
   /** FtsoOracle — reads FTSOv2, normalized to 18 decimals. */
   ftsoOracle:
     (import.meta.env.VITE_FTSO_ORACLE_CONTRACT_ID as string | undefined) ??

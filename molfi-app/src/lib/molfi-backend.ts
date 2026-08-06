@@ -282,6 +282,35 @@ export interface ConfPrepareClaim {
   recipientField?: string;
 }
 
+export interface ConfStakePlan {
+  marketId: string;
+  side: "YES" | "NO";
+  amount: number;
+  payout: number;
+  noteCount: number;
+  plan: { tier: number; denom: number; count: number }[];
+  planLabel: string;
+  notes: ConfPrepareCommit[];
+}
+
+/** Build the standard notes an ARBITRARY stake decomposes into. */
+export async function fetchConfidentialStake(
+  side: "YES" | "NO",
+  marketId: string,
+  amount: number,
+): Promise<ConfStakePlan> {
+  const r = await fetch(`${BASE}/api/confidential/prepare-stake`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ side, marketId, amount }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || "Confidential service unavailable");
+  }
+  return r.json();
+}
+
 /** Generate a hidden commitment note for a confidential bet on `side` at `tier`. */
 export async function fetchConfidentialNote(
   side: "YES" | "NO",

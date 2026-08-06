@@ -467,6 +467,20 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
     }
   });
 
+  /**
+   * Build the notes for an arbitrary stake. The UI posts a free-form amount;
+   * this returns the standard notes it decomposes into.
+   */
+  app.post("/api/confidential/prepare-stake", (req, res) => {
+    try {
+      const { side, marketId, amount } = req.body || {};
+      if (!marketId) return res.status(400).json({ error: "marketId required" });
+      res.json(zk.prepareCommitBatch(side, marketId, amount));
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   /** The selectable stake sizes, so the UI never hardcodes them. */
   app.get("/api/confidential/tiers", (_req, res) => {
     res.json({

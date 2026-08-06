@@ -114,6 +114,7 @@ const ESCROW_ABI = [
 const CBET_ABI = [
   { type: "function", name: "commit", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "claim", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "uint256[2]" }, { type: "uint256[2][2]" }, { type: "uint256[2]" }, { type: "uint256" }, { type: "uint256" }, { type: "address" }], outputs: [] },
+  { type: "function", name: "commitBatch", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256[]" }, { type: "uint256[]" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "denoms", stateMutability: "view", inputs: [], outputs: [{ type: "uint256[]" }] },
   { type: "function", name: "poolStatus", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "uint256" }, { type: "uint256" }] },
 ] as const satisfies Abi;
@@ -396,6 +397,33 @@ export async function confidentialCommit(
     "commit",
     [asHex(marketIdHex), BigInt(tier), bigHex(commitmentHex)],
     FXRP_GAS,
+  );
+}
+
+/**
+ * Escrow an ARBITRARY stake as a batch of standard notes.
+ *
+ * The total moves in one transfer, so the deposit reads as a single amount
+ * rather than a run of identical ones. Each note is claimed separately later.
+ */
+export async function confidentialCommitBatch(
+  walletAddress: string,
+  marketIdHex: string,
+  tiers: readonly number[],
+  commitmentHexes: readonly string[],
+): Promise<string> {
+  const total = tiers.reduce(
+    (sum, t) => sum + (CONF_TIERS_BASE[t] ?? 0n),
+    0n,
+  );
+  await ensureAllowance(walletAddress, CONTRACTS.confidentialBet, total);
+  return send(
+    CONTRACTS.confidentialBet,
+    CBET_ABI,
+    "commitBatch",
+    [asHex(marketIdHex), tiers.map((t) => BigInt(t)), commitmentHexes.map(bigHex)],
+    // Scales with note count — a 27-note batch is far past the single-note limit.
+    TX_GAS + BigInt(tiers.length) * 120_000n,
   );
 }
 

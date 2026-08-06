@@ -50,7 +50,7 @@ contract call.
 | `FtsoOracle` | [`0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099`](https://coston2-explorer.flare.network/address/0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099) |
 | `MolfiMarket` | [`0xD709773A1128c1160b292F505FAA8E3e8d0786fF`](https://coston2-explorer.flare.network/address/0xD709773A1128c1160b292F505FAA8E3e8d0786fF) |
 | `PredictEscrow` | [`0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067`](https://coston2-explorer.flare.network/address/0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067) |
-| `ConfidentialBet` | [`0x19679CceD8EF85096e779A5D7685505bE4D9bDB7`](https://coston2-explorer.flare.network/address/0x19679CceD8EF85096e779A5D7685505bE4D9bDB7) |
+| `ConfidentialBet` | [`0x1e5e41cbC1e6FB96635DBc3191A03d8CC970ba99`](https://coston2-explorer.flare.network/address/0x1e5e41cbC1e6FB96635DBc3191A03d8CC970ba99) |
 | `ConfidentialBetVerifier` (BN254) | [`0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5`](https://coston2-explorer.flare.network/address/0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5) |
 | `FXRP` (FAssets FTestXRP, 6 dp) | [`0x0b6A3645c240605887a5532109323A3E12273dc7`](https://coston2-explorer.flare.network/address/0x0b6A3645c240605887a5532109323A3E12273dc7) |
 
