@@ -65,7 +65,7 @@ test("txUrl points at the Coston2 explorer", () => {
 
 test("contract addresses default to the live Coston2 deployment", () => {
   assert.equal(CONTRACTS.market, "0xD709773A1128c1160b292F505FAA8E3e8d0786fF");
-  assert.equal(CONTRACTS.escrow, "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865");
+  assert.equal(CONTRACTS.escrow, "0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067");
   assert.equal(CONTRACTS.fxrp, "0x0b6A3645c240605887a5532109323A3E12273dc7");
 });
 

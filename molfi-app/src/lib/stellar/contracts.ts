@@ -34,7 +34,7 @@ export const CONTRACTS = {
   /** predict-escrow — FXRP-collateralized pari-mutuel betting + ZK-gated bets. */
   predictEscrow:
     (import.meta.env.VITE_PREDICT_ESCROW_CONTRACT_ID as string | undefined) ??
-    "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
+    "0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067",
   /** confidential-bet — hidden-side commitment notes + on-chain ZK claim. */
   confidentialBet:
     (import.meta.env.VITE_CONF_BET_CONTRACT_ID as string | undefined) ??
@@ -60,10 +60,10 @@ export const CONTRACTS = {
   },
   clobSettlement:
     (import.meta.env.VITE_PREDICT_ESCROW_CONTRACT_ID as string | undefined) ??
-    "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
+    "0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067",
   vault:
     (import.meta.env.VITE_PREDICT_ESCROW_CONTRACT_ID as string | undefined) ??
-    "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
+    "0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067",
 } as const;
 
 /**

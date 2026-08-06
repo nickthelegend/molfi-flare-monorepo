@@ -36,7 +36,7 @@ export const coston2 = defineChain({
 
 export const CONTRACTS = {
   market: process.env.MOLFI_MARKET || "0xD709773A1128c1160b292F505FAA8E3e8d0786fF",
-  escrow: process.env.MOLFI_ESCROW || "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865",
+  escrow: process.env.MOLFI_ESCROW || "0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067",
   oracle: process.env.MOLFI_ORACLE || "0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099",
   fxrp: process.env.MOLFI_FXRP || "0x0b6A3645c240605887a5532109323A3E12273dc7",
 };

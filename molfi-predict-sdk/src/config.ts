@@ -63,7 +63,7 @@ export const TESTNET: MolfiConfig = {
     verifier: env("MOLFI_VERIFIER", "0x5bc5f11a8e4cC8BFaeD44688DFBBbCDB00B099B5"),
     market: env("MOLFI_MARKET", "0xD709773A1128c1160b292F505FAA8E3e8d0786fF"),
     confidentialBet: env("MOLFI_CBET", "0xd765Fa0886FD534A176190828fc4A47c8C3Fbfd0"),
-    predictEscrow: env("MOLFI_ESCROW", "0x75dd1eA3e80E3B32f639bDA0894Dd2c15A58a865"),
+    predictEscrow: env("MOLFI_ESCROW", "0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067"),
     ftsoOracle: env("MOLFI_ORACLE", "0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099"),
   },
   feeds: {
