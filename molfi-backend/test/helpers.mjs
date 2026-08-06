@@ -11,8 +11,22 @@ import * as realZk from "../zk.js";
 /** A deterministic mock of chain.js — no network, no transactions. */
 export function mockChain(overrides = {}) {
   return {
-    CONTRACTS: { predictEscrow: "0xfe00776f7EFc1208F2B89A34d6Acd408a0410c9c" },
-    U: 10_000_000,
+    CONTRACTS: {
+      predictEscrow: "0x220BB958923eF274Fe61C8318559EeC2D5c5492f",
+      market: "0x6a9bC905c9ba5976BBaE19A92B6Fc032Ff0233FC",
+      fxrp: "0x0b6A3645c240605887a5532109323A3E12273dc7",
+      ftsoOracle: "0xDaeBBa2A3A354E7677f5F005F0fCa0b24b8189B3",
+    },
+    // FTSOv2 feed ids — the app maps these back to symbols when reading a
+    // market straight from chain, so the mock has to carry them too.
+    FEEDS: {
+      XRP: "0x015852502f55534400000000000000000000000000",
+      FLR: "0x01464c522f55534400000000000000000000000000",
+      BTC: "0x014254432f55534400000000000000000000000000",
+      ETH: "0x014554482f55534400000000000000000000000000",
+    },
+    // FXRP carries 6 decimals (XRP drops), not the 7 the old mock token used.
+    U: 1_000_000,
     async listMarketIds() {
       return [];
     },
@@ -31,8 +45,20 @@ export function mockChain(overrides = {}) {
     async escrowPosition() {
       return 0;
     },
+    async getMarketFull() {
+      return null;
+    },
+    async previewResolution() {
+      return null;
+    },
+    async fxrpBalance() {
+      return 0n;
+    },
     async musdcBalance() {
       return 0n;
+    },
+    async ftsoPrice() {
+      return null;
     },
     async chainlinkPrice() {
       return null;

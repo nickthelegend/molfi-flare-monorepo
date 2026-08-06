@@ -118,8 +118,11 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
     return Math.min(0.99, Math.max(0.01, p));
   }
   /** FTSO feed id -> symbol, for labelling markets read straight from chain. */
+  // `?? {}` matters: createApp accepts any chain-shaped module (tests inject a
+  // partial mock), and Object.entries(undefined) throws — which would take down
+  // app construction entirely rather than degrading one label.
   const FEED_SYMBOL = Object.fromEntries(
-    Object.entries(chain.FEEDS).map(([sym, feed]) => [String(feed).toLowerCase(), sym]),
+    Object.entries(chain.FEEDS ?? {}).map(([sym, feed]) => [String(feed).toLowerCase(), sym]),
   );
 
   const decorate = (m) => ({

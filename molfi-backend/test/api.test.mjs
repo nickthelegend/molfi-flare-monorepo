@@ -157,21 +157,74 @@ test("GET /api/onchain/markets reads an indexed doc + escrow OI", async () => {
   assert.equal(m.bets, 1);
 });
 
-test("GET /api/onchain/positions/:address returns indexed trades", async () => {
+test("GET /api/onchain/positions/:address reads escrow directly, not an index", async () => {
+  // The endpoint used to serve an `onchainTrades` collection that nothing
+  // writes, so a wallet that bet on-chain saw no positions. It now asks
+  // PredictEscrow. Mock a wallet holding 0.25 FXRP on NO in one market.
   const addr = "0x4444444444444444444444444444444444444444";
-  await h.db.collection("onchainTrades").insertOne({
-    _id: "p1", kind: "bet", market: "0xfeed", address: addr, outcome: 1, amount: 12, ts: Date.now(), txHash: "0xtx",
+  const marketId = "0x" + "ab".repeat(32);
+  const local = await bootApp({
+    chain: mockChain({
+      async listMarketIds() { return [marketId]; },
+      async escrowPosition(_id, outcome) { return outcome === 1 ? 0.25 : 0; },
+      async escrowPools() { return { yes: 0.75, no: 0.25, total: 1 }; },
+      async getMarketFull() {
+        return {
+          question: "Will XRP/USD be >= $1.06?",
+          closeTs: Math.floor(Date.now() / 1000) + 600,
+          feedId: "0x015852502f55534400000000000000000000000000",
+          strike: 1.06, op: 0, status: 0, outcome: 0, exists: true, hasOracle: true,
+        };
+      },
+    }),
   });
-  const { status, body } = await h.get(`/api/onchain/positions/${addr}`);
-  assert.equal(status, 200);
-  assert.equal(body.length, 1);
-  assert.equal(body[0].txHash, "0xtx");
-  assert.equal(body[0].outcome, 1);
+  try {
+    const { status, body } = await local.get(`/api/onchain/positions/${addr}`);
+    assert.equal(status, 200);
+    assert.equal(body.length, 1);
+    assert.equal(body[0].side, "no");
+    // 0.25 must survive rounding — FXRP is 6dp, and r2 would have kept this
+    // one but silently zeroes a 0.001 stake.
+    assert.equal(body[0].amount, 0.25);
+    assert.equal(body[0].symbol, "XRP");
+    assert.equal(body[0].status, "open");
+    assert.equal(body[0].strike, 1.06);
+  } finally {
+    await local.close();
+  }
 });
 
-test("GET /api/prices/:symbol falls back to a live Chainlink point", async () => {
-  // Boot a fresh app whose chain mock returns a Chainlink price (BTC feed).
-  const local = await bootApp({ chain: mockChain({ chainlinkPrice: async () => 61234.5 }) });
+test("GET /api/onchain/positions/:address keeps sub-cent FXRP stakes", async () => {
+  const addr = "0x5555555555555555555555555555555555555555";
+  const marketId = "0x" + "cd".repeat(32);
+  const local = await bootApp({
+    chain: mockChain({
+      async listMarketIds() { return [marketId]; },
+      async escrowPosition(_id, outcome) { return outcome === 0 ? 0.001 : 0; },
+      async escrowPools() { return { yes: 0.001, no: 0, total: 0.001 }; },
+      async getMarketFull() {
+        return {
+          question: "Will XRP/USD be >= $1.06?",
+          closeTs: Math.floor(Date.now() / 1000) + 600,
+          feedId: "0x015852502f55534400000000000000000000000000",
+          strike: 1.06, op: 0, status: 0, outcome: 0, exists: true, hasOracle: true,
+        };
+      },
+    }),
+  });
+  try {
+    const { body } = await local.get(`/api/onchain/positions/${addr}`);
+    assert.equal(body.length, 1);
+    assert.equal(body[0].amount, 0.001, "a 0.001 FXRP stake must not round to 0");
+  } finally {
+    await local.close();
+  }
+});
+
+test("GET /api/prices/:symbol falls back to a live FTSOv2 point", async () => {
+  // Boot a fresh app whose chain mock returns an FTSO price. The Flare port
+  // reads ftsoPrice; chainlinkPrice remains only as a back-compat alias.
+  const local = await bootApp({ chain: mockChain({ ftsoPrice: async () => 61234.5 }) });
   try {
     const { status, body } = await local.get("/api/prices/BTC");
     assert.equal(status, 200);
