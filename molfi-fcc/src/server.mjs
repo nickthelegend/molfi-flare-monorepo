@@ -53,6 +53,7 @@ const BOOK_ABI = [
   { type: "function", name: "books", stateMutability: "view", inputs: [{ type: "bytes32" }], outputs: [
     { name: "totalEscrowed", type: "uint256" }, { name: "bidCount", type: "uint32" }, { name: "opened", type: "bool" },
     { name: "yesPool", type: "uint256" }, { name: "noPool", type: "uint256" }, { name: "openingsRoot", type: "bytes32" }] },
+  { type: "function", name: "teeSigner", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
 ];
 
 /** Read the whole sealed book straight from chain. */
@@ -77,6 +78,21 @@ export async function handleOpenBook({ marketId }) {
   }
   const bids = await readBook(marketId);
   if (bids.length === 0) throw new Error("no sealed bids for this market");
+
+  // Refuse to produce a signature the contract will not accept. The enclave's
+  // signing key is generated in here, so a rebuild or an unpinned restart moves
+  // it while the contract still trusts the old address — and nothing looks wrong
+  // until close, when openMarket reverts with BadSignature and every stake in
+  // the book is stuck. Catching it here costs one eth_call.
+  const expected = await pub.readContract({
+    address: getAddress(BOOK), abi: BOOK_ABI, functionName: "teeSigner",
+  });
+  if (expected.toLowerCase() !== signer.address.toLowerCase()) {
+    throw new Error(
+      `tee signer mismatch: the book accepts ${expected} but this enclave signs ` +
+        `as ${signer.address} — run molfi-contracts/scripts/set-tee-signer.ts`,
+    );
+  }
 
   const result = openBook(enclave.privateKey, marketId, bids);
   const digest = openDigest({

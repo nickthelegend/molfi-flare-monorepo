@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "pretest": "npm --prefix ../molfi-fcc run build",
     "test": "vitest run",
     "test:e2e": "vitest run src/lib/stellar/onchain.e2e.spec.ts"
   },

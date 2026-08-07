@@ -6,11 +6,22 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test \"test/**/*.test.mjs\"",
+    "build": "tsc -p extension/tsconfig.json",
+    "typecheck": "tsc -p extension/tsconfig.json --noEmit",
+    "test": "npm run build && node --test \"test/**/*.test.mjs\"",
+    "sync": "node scripts/sync-extension.mjs",
+    "sync:check": "node scripts/sync-extension.mjs --check",
+    "verify": "node scripts/verify-image.mjs",
     "open": "node scripts/open-market.mjs"
   },
   "dependencies": {
+    "@noble/curves": "^1.7.0",
+    "@noble/hashes": "^1.6.1",
     "viem": "^2.21.0",
     "xrpl": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
   }
 }
