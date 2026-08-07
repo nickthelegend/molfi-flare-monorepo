@@ -54,7 +54,42 @@ const BOOK_ABI = [
     { name: "totalEscrowed", type: "uint256" }, { name: "bidCount", type: "uint32" }, { name: "opened", type: "bool" },
     { name: "yesPool", type: "uint256" }, { name: "noPool", type: "uint256" }, { name: "openingsRoot", type: "bytes32" }] },
   { type: "function", name: "teeSigner", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
+  { type: "function", name: "market", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
 ];
+
+const MARKET_ABI = [
+  { type: "function", name: "getMarket", stateMutability: "view", inputs: [{ type: "bytes32" }], outputs: [
+    { name: "question", type: "string" }, { name: "closeTs", type: "uint64" },
+    { name: "status", type: "uint8" }, { name: "winningOutcome", type: "uint32" }] },
+];
+
+/**
+ * Refuse to open a market that is still live.
+ *
+ * Opening returns every bidder's plaintext side. `openMarket` already rejects an
+ * early opening on-chain, but that protects settlement, not secrecy — the
+ * response has already left the enclave by then. Without this, anyone who can
+ * reach the extension reads the live book and front-runs it, which is exactly
+ * what a sealed book exists to prevent.
+ */
+async function assertClosed(marketId) {
+  const book = getAddress(BOOK);
+  const [marketAddr, block] = await Promise.all([
+    pub.readContract({ address: book, abi: BOOK_ABI, functionName: "market" }),
+    pub.getBlock(),
+  ]);
+  const [, closeTs] = await pub.readContract({
+    address: marketAddr, abi: MARKET_ABI, functionName: "getMarket", args: [marketId],
+  });
+  if (block.timestamp < closeTs) {
+    const e = new Error(
+      `market is still open — closes in ${closeTs - block.timestamp}s. ` +
+        "The book cannot be opened before close.",
+    );
+    e.status = 409;
+    throw e;
+  }
+}
 
 /** Read the whole sealed book straight from chain. */
 async function readBook(marketId) {
@@ -76,6 +111,8 @@ export async function handleOpenBook({ marketId }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(marketId))) {
     throw new Error("marketId must be a 32-byte hex id");
   }
+  await assertClosed(marketId);
+
   const bids = await readBook(marketId);
   if (bids.length === 0) throw new Error("no sealed bids for this market");
 

@@ -92,11 +92,13 @@ async function main() {
     fail("book state after sealing", `${total} ${count} ${opened}`);
   }
 
-  await time.increaseTo(close + 1);
-  await oracle.setPrice(XRP_USD, usd("3.50"));
-  await market.resolveFromOracle(MKT); // YES wins
-
-  // --- The handler the container serves ------------------------------------
+  // --- The leak that mattered most ------------------------------------------
+  // Before close, the enclave must refuse. `openMarket` rejects an early
+  // opening on-chain, but the handler's RESPONSE carries every bidder's
+  // plaintext side — by the time the contract says no, the secret has already
+  // left. Anyone who could reach the extension could read the live book and
+  // front-run it. This ran against a live Coston2 market and returned
+  // `side: 0` with 36 minutes still on the clock.
   const env = {
     CHAIN_ID: String(chainId),
     CHAIN_URL: rpc,
@@ -106,7 +108,20 @@ async function main() {
     SIMULATED_TEE: "true",
   };
   resetState(env);
+  {
+    const [data, status, err] = await handleOpenBook(MKT);
+    if (status === 0 && /still open/.test(String(err))) {
+      ok("refuses to open a market that is still live");
+    } else {
+      fail("PRE-CLOSE LEAK", `status ${status}, data ${String(data).slice(0, 80)}`);
+    }
+  }
 
+  await time.increaseTo(close + 1);
+  await oracle.setPrice(XRP_USD, usd("3.50"));
+  await market.resolveFromOracle(MKT); // YES wins
+
+  // --- The handler the container serves ------------------------------------
   // The on-chain route passes abi.encode(bytes32); prove that path, not a
   // convenience JSON one.
   const result = unwrap(await handleOpenBook(MKT));
@@ -157,11 +172,14 @@ async function main() {
     await ethers.getContractFactory("SealedBidBook")
   ).deploy(await token.getAddress(), await market.getAddress(), Wallet.createRandom().address, admin.address);
   const MKT2 = id("fcc-e2e-stale");
-  await market.createPriceMarket(MKT2, "XRP >= $3?", (await time.latest()) + DAY, XRP_USD, usd("3"), 0, DAY * 2);
+  const close2 = (await time.latest()) + 120;
+  await market.createPriceMarket(MKT2, "XRP >= $3?", close2, XRP_USD, usd("3"), 0, DAY * 2);
   await token.connect(alice).approve(await stale.getAddress(), ethers.MaxUint256);
   await stale.connect(alice).sealBid(
     MKT2, fxrp("10"), sealSide(enclave.publicKey, MKT2, alice.address, 0),
   );
+  // Past close, so the signer check is what rejects this and not the close one.
+  await time.increaseTo(close2 + 1);
   resetState({ ...env, SEALED_BID_BOOK: await stale.getAddress() });
   const [, status, err] = await handleOpenBook(MKT2);
   if (status === 0 && /tee signer mismatch/.test(String(err))) {

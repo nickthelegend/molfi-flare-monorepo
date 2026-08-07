@@ -48,6 +48,23 @@ export const BOOK_ABI = [
     type: "function", name: "teeSigner", stateMutability: "view",
     inputs: [], outputs: [{ type: "address" }],
   },
+  {
+    type: "function", name: "market", stateMutability: "view",
+    inputs: [], outputs: [{ type: "address" }],
+  },
+] as const;
+
+const MARKET_ABI = [
+  {
+    type: "function", name: "getMarket", stateMutability: "view",
+    inputs: [{ type: "bytes32" }],
+    outputs: [
+      { name: "question", type: "string" },
+      { name: "closeTs", type: "uint64" },
+      { name: "status", type: "uint8" },
+      { name: "winningOutcome", type: "uint32" },
+    ],
+  },
 ] as const;
 
 export interface BookSummary {
@@ -134,6 +151,30 @@ export class BookReader {
       abi: BOOK_ABI,
       functionName: "teeSigner",
     })) as Address;
+  }
+
+  /**
+   * When this market closes, and the chain's own clock.
+   *
+   * The market address is read from the book rather than configured, so the
+   * enclave cannot be pointed at a different market contract than the one the
+   * book will settle against.
+   */
+  async closeInfo(marketId: Hex): Promise<{ closeTs: bigint; now: bigint }> {
+    const client = await this.client();
+    const [marketAddr, block] = await Promise.all([
+      client.readContract({
+        address: this.book, abi: BOOK_ABI, functionName: "market",
+      }) as Promise<Address>,
+      client.getBlock(),
+    ]);
+    const [, closeTs] = (await client.readContract({
+      address: marketAddr,
+      abi: MARKET_ABI,
+      functionName: "getMarket",
+      args: [marketId],
+    })) as readonly [string, bigint, number, number];
+    return { closeTs, now: block.timestamp };
   }
 
   /** Every sealed bid, in index order — the order the Merkle leaves use. */

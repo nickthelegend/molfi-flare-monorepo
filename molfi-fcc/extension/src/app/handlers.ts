@@ -176,13 +176,29 @@ export async function handleOpenBook(msg: string): Promise<HandlerResult> {
   let summary;
   let bids;
   let expectedSigner;
+  let closeInfo;
   try {
     const r = bookReader();
-    [summary, bids, expectedSigner] = await Promise.all([
-      r.summary(marketId), r.bids(marketId), r.teeSigner(),
+    [summary, bids, expectedSigner, closeInfo] = await Promise.all([
+      r.summary(marketId), r.bids(marketId), r.teeSigner(), r.closeInfo(marketId),
     ]);
   } catch (e) {
     return fail(`reading book: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // THE MARKET MUST BE CLOSED. This is the whole product.
+  //
+  // Opening returns every bidder's plaintext side. `openMarket` already refuses
+  // an early opening with NotClosedYet — but that protects settlement, not
+  // secrecy: the response still leaves the enclave. Without this check anyone
+  // who can reach the extension reads the live book and front-runs it, which is
+  // precisely what a sealed book exists to prevent. The confidentiality is
+  // worth nothing if the enclave will simply tell you.
+  if (closeInfo.now < closeInfo.closeTs) {
+    return fail(
+      `market is still open — closes in ${closeInfo.closeTs - closeInfo.now}s. ` +
+        "The book cannot be opened before close.",
+    );
   }
   if (bids.length === 0) return fail("no sealed bids for this market");
   if (summary.opened) return fail("book is already opened");

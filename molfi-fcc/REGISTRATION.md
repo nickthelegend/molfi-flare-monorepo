@@ -119,6 +119,36 @@ exactly that. So agreement is tested, not assumed:
 | `molfi-fcc/test/cross-impl.test.mjs` | host ↔ image: keys, pools, Merkle root, digest |
 | `scripts/verify-image.mjs` | the versions actually resolved in the shipped image |
 
+## The leak that made everything else pointless
+
+`OPEN_BOOK` did not check whether the market had closed.
+
+`SealedBidBook.openMarket` rejects an early opening with `NotClosedYet`, and it
+was tempting to treat that as sufficient. It is not: the contract protects
+*settlement*, and by the time it says no, the handler's response — containing
+every bidder's plaintext side — has already left the enclave. Anyone who could
+reach the extension could read a live book and trade against it.
+
+Caught by asking, against the real Coston2 market that had just taken a sealed
+bid from the browser, with 36 minutes still on the clock:
+
+```
+{"yesPool":"2000000","noPool":"0","bidCount":1,
+ "openings":[{"index":0,"side":0,"amount":"2000000","bidder":"0xBDAAda27…"}]}
+```
+
+That is the product's central promise, returned over plain HTTP to anyone who
+asked. Both implementations now read the market's close time from the book
+itself — not from configuration, so the enclave cannot be pointed at a different
+market contract — and refuse:
+
+```
+error: market is still open — closes in 2013s. The book cannot be opened before close.
+```
+
+with `data: "0x"`. `fcc-e2e-local.ts` fails the whole run if it ever answers
+again.
+
 ## The signer-drift trap
 
 The enclave's signing key is generated inside the extension. Rebuild the image,
