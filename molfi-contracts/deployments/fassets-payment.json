@@ -1,0 +1,10 @@
+{
+  "collateralReservationId": "47147460",
+  "xrplTxHash": "F3D6EB06A24221ACEF64D41562D8AAFC93A26787627FEE90B2D84FC9C90F543C",
+  "xrplAccount": "rwHpxk4bCBYaE6MChEnhcxJgJptP2u62bm",
+  "destination": "rDEXUmuYAe9MCxVfoWArptSZNQPjKpRCXd",
+  "amountDrops": "10025000",
+  "paymentReference": "0x4642505266410001000000000000000000000000000000000000000002cf69c4",
+  "ledgerIndex": 19703781,
+  "paidAt": "2026-08-07T08:07:02.674Z"
+}

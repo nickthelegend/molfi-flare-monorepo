@@ -55,7 +55,41 @@ async function connectSynced() {
 
 const client = await connectSynced();
 
+/**
+ * Refuse to pay a reservation whose window has closed.
+ *
+ * Learned the expensive way: the XRPL testnet went down mid-window, and when it
+ * came back this script cheerfully paid 10.025 XRP against reservation 47051525
+ * ten hours after `lastUnderlyingBlock`. The agent keeps the payment, the mint
+ * cannot execute, and nothing warned first. The window is in the reservation
+ * file — there is no excuse for not reading it.
+ */
+async function assertWindowOpen() {
+  const { result } = await client.request({ command: "ledger", ledger_index: "validated" });
+  const ledger = Number(result.ledger_index ?? result.ledger?.ledger_index);
+  const closeTime = Math.floor(Date.now() / 1000);
+  const lastBlock = Number(res.lastUnderlyingBlock);
+  const lastTime = Number(res.lastUnderlyingTimestamp);
+
+  console.log(`  window      ≤ ledger ${lastBlock} (now ${ledger})`);
+  if (ledger > lastBlock || closeTime > lastTime) {
+    throw new Error(
+      `reservation ${res.collateralReservationId} EXPIRED — ledger ${ledger} > ${lastBlock}.\n` +
+        `  Paying now forfeits the XRP to the agent with no way to mint.\n` +
+        `  Make a fresh one: LOTS=1 npx hardhat run scripts/fassets-reserve.ts --network coston2`,
+    );
+  }
+  // Two ledgers of headroom is not much; say so rather than silently racing it.
+  if (lastBlock - ledger < 20) {
+    console.log(`  ⚠ only ${lastBlock - ledger} ledgers of headroom left`);
+  }
+}
+
 try {
+  // Before anything else, and before the faucet call — there is no point
+  // funding an account for a payment that cannot be minted.
+  await assertWindowOpen();
+
   let wallet;
   if (process.env.XRPL_SEED) {
     wallet = Wallet.fromSeed(process.env.XRPL_SEED);

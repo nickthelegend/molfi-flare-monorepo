@@ -68,6 +68,37 @@ successful open is only possible if the code inside really is the enclave.
 ✓ the book accepts this enclave's signer 0x6a066930CD29B1e3f9c697B7dc13cc18a0824069
 ```
 
+## The whole flow, live on Coston2, with real FXRP
+
+`node scripts/live-sealed-book.mjs` holds **no enclave key**. It fetches the
+sealing key over HTTP and asks the enclave to open the book; the private half
+never exists outside it.
+
+```
+enclave        : http://localhost:6675
+sealing key    : 0x02a26c712091177a68e3d1b6…
+the book already trusts this enclave ✅
+
+sealed 1.5 FXRP · 0xbe78a700235598d1ce0815d58fa37a9e8e4e924d2b2233297284b71cdde6ba8f
+sealed 2 FXRP   · 0xb3fb674050ad72313d9b83279ce5ef9b7fe17fdc7036eae2ea9a3a8c389880c9
+
+PUBLIC VIEW while live: 3.5 FXRP across 2 bids, opened=false
+the YES/NO split is NOT on-chain — the odds do not exist yet
+
+market resolved from FTSOv2 → YES
+ENCLAVE OPENED: YES 1.5 FXRP · NO 2 FXRP
+pools reconcile with the 3.5 FXRP the contract escrowed ✅
+the enclave signed the contract's own digest ✅
+book opened  · 0xb5db0d3d63b4a42166f5b618a411ff7b0c79d21243d365ee402e4ddf1b861df8
+winner claimed 3.43 FXRP · 0x2ae7daf1a0293c3d2fac04bc8da5954fbdd602aba19dbd7a637f6541d28cb8d1
+```
+
+The FXRP is not faucet FXRP. It was minted through FAssets: 10.025 XRP paid on
+the XRP Ledger (`F3D6EB06…`), attested by the Flare Data Connector in voting
+round 1418448, and `executeMinting` called with that proof
+(`0x8e791d1a4317a584a5c268bf36831eab173bbc0f19bd94d8b89c2ecb49d02593`). See
+`molfi-contracts/deployments/fassets-mint.json`.
+
 ## Three implementations, one key derivation
 
 The sealing format has three independent implementations: the browser
