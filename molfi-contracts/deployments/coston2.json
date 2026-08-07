@@ -29,5 +29,15 @@
     "100000000",
     "1000000000"
   ],
-  "teeSigner": "0xBDAAda2753e52e3c35A63bB0aB82fE8922f5C1e1"
+  "teeSigner": "0xBDAAda2753e52e3c35A63bB0aB82fE8922f5C1e1",
+  "fcc": {
+    "flareTeeManager": "0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE",
+    "extensionId": "0x00000000000000000000000000000000000000000000000000000000000101cc",
+    "extensionIdDecimal": 65996,
+    "instructionSender": "0x64799fc225db28d52cAe8593214E8AB372C658A3",
+    "teeMachineId": "0xD114B9B601B77D5Fa1EBdc82bdcafCdB7129f205",
+    "teeMachineStatus": "PRODUCTION",
+    "simulatedTee": true,
+    "registeredAt": "2026-08-07T05:38:55Z"
+  }
 }
