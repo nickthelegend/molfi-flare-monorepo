@@ -39,6 +39,10 @@ export const CONTRACTS = {
   confidentialBet:
     (import.meta.env.VITE_CONF_BET_CONTRACT_ID as string | undefined) ??
     "0x1e5e41cbC1e6FB96635DBc3191A03d8CC970ba99",
+  /** SealedBidBook — encrypted bids opened by the FCC enclave at close. */
+  sealedBidBook:
+    (import.meta.env.VITE_SEALED_BID_BOOK as string | undefined) ??
+    "0x22B0F197b12e86653d449326b7677e65e2162c90",
   /** FtsoOracle — reads FTSOv2, normalized to 18 decimals. */
   ftsoOracle:
     (import.meta.env.VITE_FTSO_ORACLE_CONTRACT_ID as string | undefined) ??

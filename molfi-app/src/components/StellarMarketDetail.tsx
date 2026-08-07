@@ -5,6 +5,7 @@ import {
   ExternalLink,
   Loader2,
   Lock,
+  EyeOff,
   MessageSquare,
   ShieldCheck,
   TrendingDown,
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AssetBadge } from "@/components/AssetBadge";
 import { SentimentBar } from "@/components/leverx/SentimentBar";
+import { SealedBidPanel } from "@/components/SealedBidPanel";
 import { LivePriceChart } from "@/components/LivePriceChart";
 import { useNow } from "@/hooks/useNow";
 import { useWallet } from "@/context/WalletContext";
@@ -716,6 +718,8 @@ function OnChainDetail({ id }: { id: string }) {
   const [placing, setPlacing] = useState(false);
   const [redeeming, setRedeeming] = useState(false);
   const [confidential, setConfidential] = useState(false);
+  /** Sealed-bid mode — the Flare Confidential Compute book. */
+  const [sealed, setSealed] = useState(false);
   const [confNotes, setConfNotes] = useState<StoredConfNote[]>([]);
   const [confBusy, setConfBusy] = useState<string | null>(null); // "commit" | nullifier | null
   /** Free-form confidential stake. Decomposed into standard notes below, so
@@ -1062,28 +1066,50 @@ function OnChainDetail({ id }: { id: string }) {
               </div>
             ) : (
               <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-                <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/40 p-1 text-xs font-semibold">
+                <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-1 text-xs font-semibold">
                   <button
                     type="button"
-                    onClick={() => setConfidential(false)}
+                    onClick={() => { setConfidential(false); setSealed(false); }}
                     className={cn(
                       "rounded-md py-1.5 transition",
-                      !confidential ? "bg-card text-foreground shadow-sm" : "text-muted-foreground",
+                      !confidential && !sealed ? "bg-card text-foreground shadow-sm" : "text-muted-foreground",
                     )}
                   >
                     Standard
                   </button>
                   <button
                     type="button"
-                    onClick={() => setConfidential(true)}
+                    onClick={() => { setConfidential(true); setSealed(false); }}
                     className={cn(
                       "inline-flex items-center justify-center gap-1 rounded-md py-1.5 transition",
-                      confidential ? "bg-card text-accent shadow-sm" : "text-muted-foreground",
+                      confidential && !sealed ? "bg-card text-accent shadow-sm" : "text-muted-foreground",
                     )}
                   >
                     <Lock className="h-3 w-3" /> Private
                   </button>
+                  {/* The FCC surface. Distinct from "Private": that hides YOUR
+                      side from everyone, this hides EVERYONE's side from the
+                      market until close, so the odds cannot be read at all. */}
+                  <button
+                    type="button"
+                    onClick={() => { setSealed(true); setConfidential(false); }}
+                    className={cn(
+                      "inline-flex items-center justify-center gap-1 rounded-md py-1.5 transition",
+                      sealed ? "bg-card text-accent shadow-sm" : "text-muted-foreground",
+                    )}
+                  >
+                    <EyeOff className="h-3 w-3" /> Sealed
+                  </button>
                 </div>
+                {sealed ? (
+                  <SealedBidPanel
+                    marketId={id}
+                    address={address}
+                    closed={closed}
+                    onConnect={connect}
+                  />
+                ) : (
+                <>
                 <SentimentBar yesPct={yesPct} />
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -1212,6 +1238,8 @@ function OnChainDetail({ id }: { id: string }) {
                       🔒 Each bet submits a BN254 Groth16 proof verified on-chain · real FXRP escrow · FTSOv2-settled
                     </p>
                   </>
+                )}
+                </>
                 )}
               </div>
             )}

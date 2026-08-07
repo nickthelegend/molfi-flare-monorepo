@@ -119,6 +119,16 @@ const CBET_ABI = [
   { type: "function", name: "poolStatus", stateMutability: "view", inputs: [{ type: "uint256" }], outputs: [{ type: "uint256" }, { type: "uint256" }] },
 ] as const satisfies Abi;
 
+const SEALED_ABI = [
+  { type: "function", name: "sealBid", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "bytes" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "claim", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "uint32" }, { type: "bytes32[]" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "bookStatus", stateMutability: "view", inputs: [{ type: "bytes32" }], outputs: [{ type: "uint256" }, { type: "uint32" }, { type: "bool" }] },
+  { type: "function", name: "books", stateMutability: "view", inputs: [{ type: "bytes32" }], outputs: [
+    { name: "totalEscrowed", type: "uint256" }, { name: "bidCount", type: "uint32" }, { name: "opened", type: "bool" },
+    { name: "yesPool", type: "uint256" }, { name: "noPool", type: "uint256" }, { name: "openingsRoot", type: "bytes32" }] },
+  { type: "function", name: "openMarket", stateMutability: "nonpayable", inputs: [{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }, { type: "uint32" }, { type: "bytes32" }, { type: "bytes" }], outputs: [] },
+] as const satisfies Abi;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -424,6 +434,67 @@ export async function confidentialCommitBatch(
     [asHex(marketIdHex), tiers.map((t) => BigInt(t)), commitmentHexes.map(bigHex)],
     // Scales with note count — a 27-note batch is far past the single-note limit.
     TX_GAS + BigInt(tiers.length) * 120_000n,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SealedBidBook — the FCC-backed dark book
+// ---------------------------------------------------------------------------
+
+/** What the public can see while a market is live: size, never the split. */
+export async function sealedBookStatus(marketId: string): Promise<{
+  totalEscrowed: bigint; bidCount: number; opened: boolean;
+  yesPool: bigint; noPool: bigint;
+}> {
+  const b = (await read(CONTRACTS.sealedBidBook, SEALED_ABI, "books", [asHex(marketId)])) as readonly [
+    bigint, number, boolean, bigint, bigint, string,
+  ];
+  return { totalEscrowed: b[0], bidCount: Number(b[1]), opened: b[2], yesPool: b[3], noPool: b[4] };
+}
+
+/** Escrow FXRP against a bid whose side is encrypted to the enclave. */
+export async function sealBid(
+  walletAddress: string,
+  marketId: string,
+  amountFxrp: number,
+  ciphertext: string,
+): Promise<string> {
+  const amt = toBase(amountFxrp);
+  await ensureAllowance(walletAddress, CONTRACTS.sealedBidBook, amt);
+  return send(
+    CONTRACTS.sealedBidBook, SEALED_ABI, "sealBid",
+    [asHex(marketId), amt, asHex(ciphertext)],
+    FXRP_GAS,
+  );
+}
+
+/** Relay the enclave's signed opening. Permissionless — the signature authorises it. */
+export async function openSealedBook(
+  marketId: string,
+  yesPool: bigint,
+  noPool: bigint,
+  bidCount: number,
+  openingsRoot: string,
+  signature: string,
+): Promise<string> {
+  return send(
+    CONTRACTS.sealedBidBook, SEALED_ABI, "openMarket",
+    [asHex(marketId), yesPool, noPool, bidCount, asHex(openingsRoot), asHex(signature)],
+    TX_GAS,
+  );
+}
+
+/** Claim a winning sealed bid with the enclave's Merkle proof of your side. */
+export async function claimSealedBid(
+  marketId: string,
+  bidIndex: number,
+  side: number,
+  proof: readonly string[],
+): Promise<string> {
+  return send(
+    CONTRACTS.sealedBidBook, SEALED_ABI, "claim",
+    [asHex(marketId), BigInt(bidIndex), side, proof.map(asHex)],
+    FXRP_GAS,
   );
 }
 

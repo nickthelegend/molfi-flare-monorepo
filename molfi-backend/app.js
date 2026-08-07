@@ -481,6 +481,47 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
     }
   });
 
+  // ── Sealed-bid book (Flare Confidential Compute) ──────────────────────────
+  // Proxied through the backend rather than called from the browser: the
+  // enclave lives behind a tunnel whose hostname changes on restart, and the
+  // frontend should not carry that URL or go stale when it rotates.
+  const FCC_URL = process.env.MOLFI_FCC_URL || "";
+
+  async function fccAction(opCommand, payload = {}) {
+    if (!FCC_URL) throw new Error("MOLFI_FCC_URL not configured — the enclave is not reachable");
+    const r = await fetch(`${FCC_URL.replace(/\/$/, "")}/action`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ opType: "MOLFI", opCommand, payload }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) throw new Error(j.error || `enclave ${r.status}`);
+    return j.result;
+  }
+
+  /** The enclave's public key, so a client can seal a bid to it. */
+  app.get("/api/sealed/key", async (_req, res) => {
+    try {
+      res.json(await fccAction("SEAL_KEY"));
+    } catch (e) {
+      res.status(503).json({ error: e.message });
+    }
+  });
+
+  /** Ask the enclave to open a closed market and return its signed result. */
+  app.post("/api/sealed/open", async (req, res) => {
+    try {
+      const { marketId } = req.body || {};
+      if (!/^0x[0-9a-fA-F]{64}$/.test(String(marketId))) {
+        return res.status(400).json({ error: "marketId must be a 32-byte hex id" });
+      }
+      res.json(await fccAction("OPEN_BOOK", { marketId }));
+    } catch (e) {
+      res.status(503).json({ error: e.message });
+    }
+  });
+
   /** The selectable stake sizes, so the UI never hardcodes them. */
   app.get("/api/confidential/tiers", (_req, res) => {
     res.json({

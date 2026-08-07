@@ -23,6 +23,11 @@ import { hkdf } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha256";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
+/** HKDF `info` as BYTES — see the note in molfi-app/src/lib/sealed/seal.ts.
+ *  @noble/hashes v2 rejects a string, v1 UTF-8 encoded it; being explicit keeps
+ *  both sides deriving the same key across versions. */
+const HKDF_INFO = new TextEncoder().encode("molfi-sealed-bid-v1");
+
 const EPH_LEN = 33;
 const NONCE_LEN = 12;
 const TAG_LEN = 16;
@@ -42,7 +47,7 @@ function aad(marketId, bidder) {
 function deriveKey(shared, ephPub) {
   // The ephemeral public key is in the salt so two bids that somehow shared a
   // secret still derive different keys.
-  return Buffer.from(hkdf(sha256, shared, ephPub, "molfi-sealed-bid-v1", 32));
+  return Buffer.from(hkdf(sha256, shared, ephPub, HKDF_INFO, 32));
 }
 
 /**

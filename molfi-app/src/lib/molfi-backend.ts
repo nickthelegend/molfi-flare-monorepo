@@ -293,6 +293,23 @@ export interface ConfStakePlan {
   notes: ConfPrepareCommit[];
 }
 
+export interface SealedKey {
+  publicKey: string;
+  teeSigner: string;
+  chainId: number;
+  simulated?: boolean;
+}
+
+/** The FCC enclave's public key, proxied so the browser never holds its URL. */
+export async function fetchSealedKey(): Promise<SealedKey> {
+  const r = await fetch(`${BASE}/api/sealed/key`);
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || "enclave unreachable");
+  }
+  return r.json();
+}
+
 /** Build the standard notes an ARBITRARY stake decomposes into. */
 export async function fetchConfidentialStake(
   side: "YES" | "NO",
