@@ -231,19 +231,37 @@ is, and we would rather say so than let you find out.
 the registry picks a machine we do not choose, that machine calls the extension
 and signs the answer with its attested identity. What is fragile is the budget:
 `tee-node`'s `ProxyTimeout` is a hard-coded 2 seconds, and the extension's first
-call for a market it has never seen must read the book from Coston2's *public*
-RPC. When that RPC is healthy the call lands well inside 2s and the path
-completes. When it is rate-limiting — a shared testnet gateway, 429s — the first
-attempt is cut off and the signed result carries `status: 3` and empty `data`.
-`tee-node` retries and the second attempt succeeds in ~10ms off the warm cache,
-but the proxy publishes only the *first* result for an instruction id, so the
-retry is not the one a caller can fetch.
+call for a market it has never seen has to read the book from Coston2 before it
+can answer. When it overruns, the signed result carries `status: 3` and empty
+`data`; `tee-node` retries and the second attempt succeeds in ~10ms off the warm
+cache, but the proxy publishes only the *first* result for an instruction id, so
+the retry is not the one a caller can fetch.
 
-That is a deployment constraint, not a design flaw, and the fix is a dedicated
-RPC endpoint for the enclave rather than the public one. We have left the
-registered machine untouched rather than rebuild for it: restarting the stack
-regenerates the node's identity key, and the machine address published above —
-the one you can verify yourself — would no longer be the one answering.
+We first blamed the public RPC's rate limiting and recommended a dedicated
+endpoint. Measuring killed that theory: `flare.network`, Ankr and Enosys all
+answer a Coston2 round trip in 0.4-0.6s, so a different provider buys about
+0.1s against a budget that was being missed by more than that. The cost is the
+*number of sequential round trips*, not the speed of any one.
+
+So the fix is in the extension, and it is in this repo: `BookReader.bids()`
+re-fetched `bidCount` even though `books()` — which `summary()` already reads in
+the parallel group — returns it, putting a whole extra round trip in series
+ahead of the `getBid` batch. The critical path is now two round trips instead of
+three (`molfi-fcc/extension/src/app/`, synced into the scaffold).
+
+It is **not yet deployed**, and that is deliberate. Landing it means rebuilding
+the image, which regenerates `tee-node`'s identity key and produces a new
+machine — the address published above, the one you can verify yourself, would
+have to be re-registered and re-attested by Flare's data providers on their
+schedule, not ours. Path 1 is unaffected either way: it talks to the extension
+directly, not through the container. To deploy:
+
+```bash
+cd molfi-fcc && npm run sync                     # already done — scaffold is in sync
+cd ~/molfi-fce && ./scripts/start-services.sh --chain coston2
+npx hardhat run scripts/set-tee-machine.ts --network coston2   # register the new machine
+npx hardhat run scripts/retire-stale-tee.ts --network coston2  # pause the old one
+```
 
 ```bash
 cd molfi-fcc

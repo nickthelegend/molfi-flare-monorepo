@@ -347,4 +347,24 @@ vault 503s rather than reporting zeros.
 | Item | Status |
 |---|---|
 | B33 / D10 Pinata | **UNTESTED** — `PINATA_JWT` does not exist. The endpoint fails loudly; the upload path cannot be exercised. |
-| Instruction path (§J) | **BLOCKED** — unchanged from round 2: the enclave reads a rate-limited public RPC inside tee-node's hard 2s budget. Needs a dedicated RPC endpoint. |
+| Instruction path (§J) | **BLOCKED on deployment, root cause fixed in source.** See below. |
+
+### The instruction path, re-diagnosed
+
+Re-ran with the RPC quiet: it failed again, so round 2's "it was just our load"
+was wrong. Measured all three Coston2 endpoints — flare.network 0.51s, Ankr
+0.41s, Enosys 0.58s — which kills the "use a dedicated RPC" recommendation too:
+a different provider buys ~0.1s against a budget being missed by more.
+
+The real cost is sequential round trips. `BookReader.bids()` re-fetched
+`bidCount` although `books()` — read by `summary()` in the parallel group —
+already returns it, so the critical path was `books` → `bidCount` → `getBid`:
+three round trips at 0.4-0.6s against a hard 2s. Fixed to two
+(`molfi-fcc/extension/src/app/`), typecheck clean, fcc 18/18, synced into the
+scaffold.
+
+**Not deployed, deliberately.** Landing it rebuilds the image, which regenerates
+tee-node's identity and requires re-registering and re-attesting a new machine —
+on Flare's data providers' schedule, not ours. The README publishes the current
+machine address for independent verification. Path 1 is unaffected (it reaches
+the extension directly, not through the container). Runbook is in the README.

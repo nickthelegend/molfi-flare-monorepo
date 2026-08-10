@@ -206,14 +206,27 @@ export class BookReader {
   }
 
   /** Every sealed bid, in index order — the order the Merkle leaves use. */
-  async bids(marketId: Hex): Promise<SealedBid[]> {
+  /**
+   * @param knownCount the bid count if the caller already has it. `books()`
+   *   returns it, and `summary()` reads `books()` — so fetching it again here
+   *   put a whole extra RPC round trip in front of the `getBid` batch, in
+   *   series. tee-node gives the extension a hard 2 seconds and a Coston2 round
+   *   trip measures 0.4-0.6s, so that one avoidable hop was a quarter of the
+   *   budget, and the first OPEN_BOOK for a market overran it: the signed
+   *   result came back `status: 3` with empty data, and the proxy publishes
+   *   only that first result. Pass the count you already have.
+   */
+  async bids(marketId: Hex, knownCount?: number | bigint): Promise<SealedBid[]> {
     const client = await this.client();
-    const n = (await client.readContract({
-      address: this.book,
-      abi: BOOK_ABI,
-      functionName: "bidCount",
-      args: [marketId],
-    })) as bigint;
+    const n =
+      knownCount !== undefined
+        ? BigInt(knownCount)
+        : ((await client.readContract({
+            address: this.book,
+            abi: BOOK_ABI,
+            functionName: "bidCount",
+            args: [marketId],
+          })) as bigint);
 
     const reads = Array.from({ length: Number(n) }, (_, i) =>
       client.readContract({

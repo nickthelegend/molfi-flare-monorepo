@@ -223,11 +223,20 @@ async function computeOpening(
   let expectedSigner;
   let closeInfo;
   let reader;
+  // Two round trips, not three.
+  //
+  // `bids()` used to fetch the bid count itself, and that read could only start
+  // after the client was ready — so the critical path was
+  // `books` → `bidCount` → `getBid`, three Coston2 round trips at 0.4-0.6s
+  // each, against tee-node's hard 2s ProxyTimeout. `books()` already carries
+  // the count, so the first group now yields it and the `getBid` batch is the
+  // only thing left to wait for.
   try {
     reader = bookReader();
-    [summary, bids, expectedSigner, closeInfo] = await Promise.all([
-      reader.summary(marketId), reader.bids(marketId), reader.teeSigner(), reader.closeInfo(marketId),
+    [summary, expectedSigner, closeInfo] = await Promise.all([
+      reader.summary(marketId), reader.teeSigner(), reader.closeInfo(marketId),
     ]);
+    bids = await reader.bids(marketId, summary.bidCount);
   } catch (e) {
     return { error: `reading book: ${e instanceof Error ? e.message : String(e)}` };
   }
