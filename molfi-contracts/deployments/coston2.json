@@ -37,12 +37,12 @@
     "extensionId": "0x000000000000000000000000000000000000000000000000000000000001023c",
     "extensionIdDecimal": 66108,
     "instructionSender": "0xF91a16Ae48609927EA9220508dda9DEA2149B846",
-    "teeMachineId": "0x33ed6fba3FC0b8A9bD656AfAaa8dd1915DEDB201",
-    "teeMachineStatus": "INITIALIZED (availability tx unfunded)",
+    "teeMachineId": "0x0A752D897f7D61Ce0690EEF812027000813467bb",
+    "teeMachineStatus": "PRODUCTION",
     "simulatedTee": true,
     "registeredAt": "2026-08-07T05:38:55Z",
     "molfiInstructionSender": "0xF91a16Ae48609927EA9220508dda9DEA2149B846",
     "extProxyUrl": "https://congressional-spin-precise-speak.trycloudflare.com"
   },
-  "teeMachine": "0xD114B9B601B77D5Fa1EBdc82bdcafCdB7129f205"
+  "teeMachine": "0x0A752D897f7D61Ce0690EEF812027000813467bb"
 }

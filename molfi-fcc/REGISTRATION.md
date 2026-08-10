@@ -149,6 +149,69 @@ error: market is still open — closes in 2013s. The book cannot be opened befor
 with `data: "0x"`. `fcc-e2e-local.ts` fails the whole run if it ever answers
 again.
 
+## The on-chain instruction path — live
+
+Settlement can be *asked for by a transaction*. Nothing in the chain below
+depends on our server being honest, or up: the request is attributable, the
+machine is chosen by the registry, and the answer is signed by an identity Flare
+attested.
+
+```
+sendOpenBook(marketId)                      MolfiInstructionSender 0xF91a16Ae…
+  → data providers route it                 extension 66108
+  → a machine the REGISTRY picked           0x0A752D89… (PRODUCTION)
+  → tee-node signs the ActionResult
+  → openMarketFromTee(data, id, tag, status, signature)
+```
+
+Proven end to end on Coston2:
+
+```
+requested on-chain · instruction 0xea69866c4b3c77492d403827819a002193424c2b554bef467c48fec291da142f
+                     tx 0x8a8f7deeb66654e02c75f47072f53616483322fa877bffe4d176ef6d3def90e8
+answered · status 1 · tag "threshold"
+openMarketFromTee accepted · 0xf4fe8a3fc5907600464334d1d437d66da6f2964ad5cedbf144a9dd8c686212bc
+bid 0 claimed 1 FXRP       · 0xd7ddf62e518e9b5efa10e03d7144316d4a1ad4839d60c5a804bd5536746db383
+```
+
+### Three failures on the way, each worth knowing
+
+**1. The proxy pins the node's identity at bootstrap — and only at bootstrap.**
+Restarting *only* the `extension-tee` container gives the node a fresh key while
+the proxy keeps the old one, and it then rejects every result the node produces:
+
+```
+result lost … opType=F_GET opCommand=TEE_INFO: 'forbidden': invalid teeID
+tee info update unsuccessful in 16623 attempts
+```
+
+16,676 rejections in our case, and the *only* outward symptom is a 404 when you
+fetch an action result. Nothing says "identity mismatch" where you are looking.
+**Always bring redis + proxy + node down together**, not just the extension.
+
+**2. An extension gets exactly 2 seconds.** `settings.ProxyTimeout` in tee-node
+is a hard-coded `2 * time.Second`, not configurable. A round trip to Coston2's
+public RPC measures 400-600ms; the Multicall3 probe alone is 595ms. The first
+instruction paid the probe, the market-address read, the book read and the bid
+reads in sequence and went over — producing a signed ActionResult with
+`status: 3` and `data: "0x"`, which decodes to nothing and settles no market:
+
+```
+"log": "Post \"http://localhost:7702/action\": context deadline exceeded"
+```
+
+Fixed by paying the fixed costs at startup (`BookReader.warm()`), caching the
+book's immutable `market` address, collapsing `closeInfo` into one parallel
+round, and caching computed openings — safe because `sealBid` reverts after
+close, so a closed book can never change.
+
+**3. Every rebuild leaves a stale machine ACTIVE.** The node's key is
+regenerated on each container start, so each registration adds a machine and the
+previous one stays active with nobody listening. `getRandomTeeIds` keeps handing
+them out, so a share of instructions vanish into a void — and after a few
+rebuilds, most of them. `scripts/retire-stale-tee.ts` pauses all but the live
+one.
+
 ## Two ways to authorise an opening, and why the second is better
 
 `SealedBidBook` now accepts an opening from either of two identities.

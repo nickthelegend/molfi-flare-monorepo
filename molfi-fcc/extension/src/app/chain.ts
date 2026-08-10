@@ -78,6 +78,8 @@ export class BookReader {
   readonly chainId: number;
   private readonly chainUrl: string;
   private cached: Promise<PublicClient> | null = null;
+  /** The book's `market` is immutable; reading it per request is a wasted trip. */
+  private marketAddr: Address | null = null;
 
   constructor(cfg: MolfiConfig) {
     if (!cfg.book) throw new Error("SEALED_BID_BOOK is not configured");
@@ -132,6 +134,35 @@ export class BookReader {
     return this.cached;
   }
 
+  /**
+   * Pay the fixed costs before anyone is waiting.
+   *
+   * tee-node gives an extension **2 seconds** (`settings.ProxyTimeout`, not
+   * configurable) to answer, and a round trip to Coston2's public RPC measures
+   * 400-600ms. The Multicall3 probe alone is 595ms, and resolving the book's
+   * market address is another. Paying both on the first instruction put the
+   * handler over the line — the symptom was a signed ActionResult with status 3
+   * and `data: "0x"`, which decodes to nothing and settles no market.
+   *
+   * Called once at startup so no request ever pays them.
+   */
+  async warm(): Promise<void> {
+    const client = await this.client();
+    this.marketAddr = (await client.readContract({
+      address: this.book, abi: BOOK_ABI, functionName: "market",
+    })) as Address;
+  }
+
+  /** The market contract this book settles against. Cached — it is immutable. */
+  private async market(): Promise<Address> {
+    if (this.marketAddr) return this.marketAddr;
+    const client = await this.client();
+    this.marketAddr = (await client.readContract({
+      address: this.book, abi: BOOK_ABI, functionName: "market",
+    })) as Address;
+    return this.marketAddr;
+  }
+
   async summary(marketId: Hex): Promise<BookSummary> {
     const client = await this.client();
     const [totalEscrowed, bidCount, opened] = (await client.readContract({
@@ -162,19 +193,16 @@ export class BookReader {
    */
   async closeInfo(marketId: Hex): Promise<{ closeTs: bigint; now: bigint }> {
     const client = await this.client();
-    const [marketAddr, block] = await Promise.all([
-      client.readContract({
-        address: this.book, abi: BOOK_ABI, functionName: "market",
-      }) as Promise<Address>,
+    const marketAddr = await this.market();
+    // One round of parallel work, not two: reading the market address first and
+    // THEN the market was a sequential 400ms nobody needed to wait for.
+    const [block, m] = await Promise.all([
       client.getBlock(),
+      client.readContract({
+        address: marketAddr, abi: MARKET_ABI, functionName: "getMarket", args: [marketId],
+      }) as Promise<readonly [string, bigint, number, number]>,
     ]);
-    const [, closeTs] = (await client.readContract({
-      address: marketAddr,
-      abi: MARKET_ABI,
-      functionName: "getMarket",
-      args: [marketId],
-    })) as readonly [string, bigint, number, number];
-    return { closeTs, now: block.timestamp };
+    return { closeTs: m[1], now: block.timestamp };
   }
 
   /** Every sealed bid, in index order — the order the Merkle leaves use. */

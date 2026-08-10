@@ -51,6 +51,20 @@ let signer = privateKeyToAccount(
 );
 let reader: BookReader | null = null;
 
+/**
+ * Computed openings, keyed by market.
+ *
+ * Safe to cache indefinitely, and that is not an optimisation gamble: `sealBid`
+ * reverts once a market has closed, so a closed book can never gain a bid. Its
+ * opening is therefore final the moment it is first computed.
+ *
+ * This exists because of the 2-second ceiling. Even fully batched, reading a
+ * book costs a round trip per multicall and grows with the number of bids — a
+ * large book would blow the budget however well it is written. Computing once
+ * and answering from memory makes the second attempt instant regardless of size.
+ */
+const openings = new Map<string, { book: Hex; result: ReturnType<typeof openBook> }>();
+
 /** Lazy so a missing SEALED_BID_BOOK breaks OPEN_BOOK only, never startup. */
 function bookReader(): BookReader {
   if (!reader) reader = new BookReader(cfg);
@@ -58,6 +72,7 @@ function bookReader(): BookReader {
 }
 
 // --- Extension state ---------------------------------------------------------
+let cachedSigner: string | null = null;
 let openedCount = 0;
 let lastMarketOpened: string | null = null;
 let lastBidCount = 0;
@@ -67,6 +82,8 @@ export function resetState(env?: NodeJS.ProcessEnv): void {
   openedCount = 0;
   lastMarketOpened = null;
   lastBidCount = 0;
+  openings.clear();
+  cachedSigner = null;
   if (env) {
     cfg = loadConfig(env);
     enclave = enclaveKeypair(cfg.enclavePrivateKey);
@@ -94,6 +111,16 @@ export function register(framework: Framework): void {
   // Server per case, and repeating the key on every one buries the output.
   if (bannerShown) return;
   bannerShown = true;
+
+  // Pay the RPC's fixed costs now — see BookReader.warm(). tee-node allows two
+  // seconds per action and a cold client spends most of that before it reads
+  // anything.
+  if (cfg.book) {
+    bookReader()
+      .warm()
+      .then(() => console.log("[molfi] chain client warm — multicall + market cached"))
+      .catch((e) => console.warn(`[molfi] warmup failed (will retry lazily): ${e.message}`));
+  }
 
   console.log(`[molfi] enclave sealing key ${enclave.publicKey}`);
   console.log(`[molfi] tee signer          ${signer.address}`);
@@ -183,6 +210,14 @@ async function computeOpening(
     return { error: `decoding request: ${e instanceof Error ? e.message : String(e)}` };
   }
 
+  // A cached opening answers in microseconds. The guards below still run on the
+  // first computation; re-deriving them per call would reintroduce the latency
+  // the cache exists to remove, and a closed book cannot change.
+  const hit = openings.get(marketId.toLowerCase());
+  if (hit) {
+    return { marketId, book: hit.book, result: hit.result, expectedSigner: cachedSigner ?? signer.address };
+  }
+
   let summary;
   let bids;
   let expectedSigner;
@@ -215,6 +250,7 @@ async function computeOpening(
 
   // The confidential part. Plaintext sides exist only in here.
   const result = openBook(enclave.privateKey, marketId, bids);
+  openings.set(marketId.toLowerCase(), { book: reader.book, result });
 
   // The contract will reject an opening that fails to reconcile. Checking the
   // same invariants here turns that revert into a diagnosis: a mismatch means
@@ -227,6 +263,7 @@ async function computeOpening(
     return { error: `bid count mismatch: read ${result.bidCount} vs book ${summary.bidCount}` };
   }
 
+  cachedSigner = expectedSigner;
   return { marketId, book: reader.book, result, expectedSigner };
 }
 
