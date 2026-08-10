@@ -113,20 +113,55 @@ test("GET /api/leaderboard aggregates indexed on-chain bet/redeem events", async
   assert.equal(row.wins, 1);
 });
 
-test("vaults: deposit updates TVL + position + activity/history", async () => {
+test("vaults: TVL and position come from the contract, not the deposit mirror", async () => {
   const addr = "0x3333333333333333333333333333333333333333";
+
+  // The mirror still records a deposit for the depositor count…
   const dep = await h.post("/api/vaults/deposit", { address: addr, amount: 500 });
   assert.equal(dep.status, 200);
   assert.equal(dep.body.deposited, 500);
 
+  // …but it must NOT move the reported TVL. This assertion is the inversion of
+  // what this test used to check, and it is the whole point: a Mongo row once
+  // conjured 500 FXRP of TVL and a 100% pool share for a wallet that held no
+  // shares and could not withdraw a thing, because there was no vault contract
+  // at all. Only the chain can say what the vault holds.
   const vaults = await h.get("/api/vaults");
   assert.equal(vaults.status, 200);
-  assert.ok(vaults.body[0].tvl >= 500, "TVL reflects the deposit");
+  assert.equal(vaults.body[0].tvl, 0, "TVL is the contract's balance, not the mirror's sum");
+  assert.equal(vaults.body[0].simulated, undefined, "nothing here is simulated any more");
+  assert.ok(vaults.body[0].address, "the payload names the vault contract");
 
   const pos = await h.get(`/api/vaults/position/${addr}`);
   assert.equal(pos.status, 200);
-  assert.equal(pos.body.deposited, 500);
-  assert.ok(pos.body.sharePct > 0);
+  assert.equal(pos.body.shares, 0);
+  assert.equal(pos.body.deposited, 0);
+  assert.equal(pos.body.sharePct, 0);
+});
+
+test("vaults: a malformed address is rejected, not answered with a zero position", async () => {
+  const { status, body } = await h.get("/api/vaults/position/not-an-address");
+  assert.equal(status, 400);
+  assert.match(body.error, /address/);
+});
+
+test("vaults: an unreadable vault reports the failure instead of inventing zeros", async () => {
+  const broken = await bootApp({
+    chain: mockChain({
+      async lpVaultPosition() {
+        throw new Error("rpc down");
+      },
+    }),
+  });
+  try {
+    const { status, body } = await broken.get(
+      "/api/vaults/position/0x3333333333333333333333333333333333333333",
+    );
+    assert.equal(status, 503);
+    assert.match(body.error, /could not read the vault/);
+  } finally {
+    await broken.close();
+  }
 });
 
 test("GET /api/onchain/markets returns [] when no indexed/on-chain markets", async () => {

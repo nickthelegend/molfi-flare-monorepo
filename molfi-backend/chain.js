@@ -52,6 +52,7 @@ export const CONTRACTS = {
   confidentialBet: process.env.MOLFI_CBET || DEPLOY?.contracts?.confidentialBet,
   verifier: process.env.MOLFI_VERIFIER || DEPLOY?.contracts?.confidentialBetVerifier,
   ftsoOracle: process.env.MOLFI_ORACLE || DEPLOY?.contracts?.ftsoOracle,
+  lpVault: process.env.MOLFI_LP_VAULT || DEPLOY?.contracts?.lpVault,
   /** FXRP — FAssets-wrapped XRP, the collateral. */
   fxrp: process.env.MOLFI_FXRP || DEPLOY?.fxrp,
 };
@@ -565,3 +566,48 @@ export const chainlinkPrice = ftsoPrice;
 export const EXPLORER = "https://coston2-explorer.flare.network";
 export const txUrl = (h) => `${EXPLORER}/tx/${h}`;
 export const addressUrl = (a) => `${EXPLORER}/address/${a}`;
+
+// ── MolfiLpVault ────────────────────────────────────────────────────────────
+
+export const LP_VAULT_ABI = [
+  { type: "function", name: "totalAssets", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "totalShares", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "sharePrice", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "lifetimeFees", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "sharesOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "assetsOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+];
+
+/**
+ * The LP vault's live state, read from the contract.
+ *
+ * These numbers used to be a Mongo sum with `simulated: true` beside them,
+ * because there was no vault contract at all. Everything here is now a chain
+ * read: shares exist, and so does the withdrawal they entitle you to.
+ */
+export async function lpVaultState() {
+  const address = getAddress(CONTRACTS.lpVault);
+  const [assets, shares, price, fees] = await Promise.all([
+    readContract(address, LP_VAULT_ABI, "totalAssets"),
+    readContract(address, LP_VAULT_ABI, "totalShares"),
+    readContract(address, LP_VAULT_ABI, "sharePrice"),
+    readContract(address, LP_VAULT_ABI, "lifetimeFees"),
+  ]);
+  return {
+    tvl: Number(assets) / U,
+    totalShares: Number(shares) / U,
+    // 1e18-scaled on-chain; parity is 1.0.
+    sharePrice: Number(price) / 1e18,
+    lifetimeFees: Number(fees) / U,
+  };
+}
+
+/** One wallet's vault position, read from the contract. */
+export async function lpVaultPosition(who) {
+  const address = getAddress(CONTRACTS.lpVault);
+  const [shares, assets] = await Promise.all([
+    readContract(address, LP_VAULT_ABI, "sharesOf", [getAddress(who)]),
+    readContract(address, LP_VAULT_ABI, "assetsOf", [getAddress(who)]),
+  ]);
+  return { shares: Number(shares) / U, assets: Number(assets) / U };
+}

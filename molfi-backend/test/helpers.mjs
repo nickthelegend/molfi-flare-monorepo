@@ -16,6 +16,7 @@ export function mockChain(overrides = {}) {
       market: "0xD709773A1128c1160b292F505FAA8E3e8d0786fF",
       fxrp: "0x0b6A3645c240605887a5532109323A3E12273dc7",
       ftsoOracle: "0xABB3FAFD87F60a8dEA8C2074C1A36984305fB099",
+      lpVault: "0x5F03D67518E1a43b1ED6CC65d736d733AC5a0E23",
     },
     // FTSOv2 feed ids — the app maps these back to symbols when reading a
     // market straight from chain, so the mock has to carry them too.
@@ -27,6 +28,17 @@ export function mockChain(overrides = {}) {
     },
     // FXRP carries 6 decimals (XRP drops), not the 7 the old mock token used.
     U: 1_000_000,
+    /**
+     * MolfiLpVault reads. The LP figures come from the contract now, so the
+     * mock has to answer for it — a stub here, but the product has none: the
+     * endpoint reads the deployed vault and 503s if it cannot.
+     */
+    async lpVaultState() {
+      return { tvl: 0, totalShares: 0, sharePrice: 1, lifetimeFees: 0 };
+    },
+    async lpVaultPosition() {
+      return { shares: 0, assets: 0 };
+    },
     async listMarketIds() {
       return [];
     },

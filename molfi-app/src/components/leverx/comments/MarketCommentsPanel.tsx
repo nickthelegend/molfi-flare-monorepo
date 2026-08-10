@@ -2,10 +2,6 @@ import { CommentComposer } from "@/components/leverx/comments/CommentComposer";
 import { CommentList } from "@/components/leverx/comments/CommentList";
 import { LoadingState } from "@/components/ui/loading-state";
 import type { useMarketComments } from "@/hooks/useMarketComments";
-import {
-  isSimulatedComment,
-  mergeCommentsWithSimulated,
-} from "@/lib/comments/simulated-comments";
 import { uploadCommentImage } from "@/lib/molfi-backend";
 import { showTxError } from "@/lib/toast";
 
@@ -40,8 +36,6 @@ export function MarketCommentsPanel({ address, commentsState }: Props) {
     loadMore,
     hasMore,
   } = commentsState;
-
-  const displayComments = mergeCommentsWithSimulated(comments);
 
   const postImage = async (file: File) => {
     if (!address) return;
@@ -88,10 +82,10 @@ export function MarketCommentsPanel({ address, commentsState }: Props) {
       {!loading && !error ? (
         <>
           <CommentList
-            comments={displayComments}
+            comments={comments}
             address={address}
             onToggleLike={async (commentId, liked) => {
-              if (!address || isSimulatedComment(commentId)) return;
+              if (!address) return;
               try {
                 await toggleLike(commentId, address, liked);
               } catch (err) {
@@ -99,7 +93,7 @@ export function MarketCommentsPanel({ address, commentsState }: Props) {
               }
             }}
             onReply={async (commentId, text) => {
-              if (!address || isSimulatedComment(commentId)) return;
+              if (!address) return;
               try {
                 await postReply(commentId, address, { type: "text", text });
               } catch (err) {
@@ -107,7 +101,7 @@ export function MarketCommentsPanel({ address, commentsState }: Props) {
               }
             }}
             onReplyGif={async (commentId, path) => {
-              if (!address || isSimulatedComment(commentId)) return;
+              if (!address) return;
               try {
                 await postReply(commentId, address, { type: "gif", path });
               } catch (err) {
@@ -115,7 +109,7 @@ export function MarketCommentsPanel({ address, commentsState }: Props) {
               }
             }}
             onDeleteComment={async (commentId) => {
-              if (!address || isSimulatedComment(commentId)) return;
+              if (!address) return;
               try {
                 await deleteComment(commentId, address);
               } catch (err) {
@@ -123,7 +117,7 @@ export function MarketCommentsPanel({ address, commentsState }: Props) {
               }
             }}
             onDeleteReply={async (commentId, replyId) => {
-              if (!address || isSimulatedComment(commentId)) return;
+              if (!address) return;
               try {
                 await deleteReply(commentId, replyId, address);
               } catch (err) {

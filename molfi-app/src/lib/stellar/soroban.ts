@@ -376,10 +376,56 @@ export async function escrowBetZk(
   return send(CONTRACTS.predictEscrow, ESCROW_ABI, "betZk", [asHex(marketIdHex), outcome, amount, a, b, c, pub], TX_GAS);
 }
 
-/** Deposit `amountUsdc` FXRP into the fee vault (funds the escrow's LP pot). */
+// ---------------------------------------------------------------------------
+// MolfiLpVault — deposit FXRP, hold shares, withdraw them again
+// ---------------------------------------------------------------------------
+
+const LP_VAULT_ABI = [
+  { type: "function", name: "deposit", stateMutability: "nonpayable", inputs: [{ type: "uint256" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "withdraw", stateMutability: "nonpayable", inputs: [{ type: "uint256" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "withdrawAll", stateMutability: "nonpayable", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "totalAssets", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "totalShares", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "sharesOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "assetsOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "sharePrice", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "lifetimeFees", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+] as const;
+
+/**
+ * Deposit `amountUsdc` FXRP into the LP vault and receive shares.
+ *
+ * Previously this transferred FXRP straight to PredictEscrow — a contract that
+ * cannot credit or refund a bare transfer — so the deposit was unrecoverable.
+ * It now approves and calls `deposit`, which mints a share balance the holder
+ * can withdraw against.
+ */
 export async function vaultDepositOnChain(walletAddress: string, amountUsdc: number): Promise<string> {
   const amount = toBase(amountUsdc);
-  return send(CONTRACTS.fxrp, MUSDC_ABI, "transfer", [getAddress(CONTRACTS.vault), amount], FXRP_GAS);
+  await ensureAllowance(walletAddress, CONTRACTS.lpVault, amount);
+  return send(CONTRACTS.lpVault, LP_VAULT_ABI, "deposit", [amount], TX_GAS);
+}
+
+/** Burn every share this wallet holds and take the FXRP back. */
+export async function vaultWithdrawAllOnChain(): Promise<string> {
+  return send(CONTRACTS.lpVault, LP_VAULT_ABI, "withdrawAll", [], TX_GAS);
+}
+
+/** This wallet's live vault position, read from the contract. */
+export async function vaultPositionOnChain(
+  walletAddress: string,
+): Promise<{ shares: number; assets: number }> {
+  const [shares, assets] = await Promise.all([
+    publicClient.readContract({
+      address: getAddress(CONTRACTS.lpVault), abi: LP_VAULT_ABI, functionName: "sharesOf",
+      args: [getAddress(walletAddress)],
+    }),
+    publicClient.readContract({
+      address: getAddress(CONTRACTS.lpVault), abi: LP_VAULT_ABI, functionName: "assetsOf",
+      args: [getAddress(walletAddress)],
+    }),
+  ]);
+  return { shares: Number(shares) / MUSDC_UNIT, assets: Number(assets) / MUSDC_UNIT };
 }
 
 // ---------------------------------------------------------------------------

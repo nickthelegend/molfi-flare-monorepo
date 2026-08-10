@@ -162,14 +162,17 @@ export async function fetchVaultActivity(): Promise<VaultActivity[]> {
 }
 
 export interface VaultPosition {
+  /** Current FXRP value of the holding, read from MolfiLpVault. */
   deposited: number;
   sharePct: number;
   earned: number;
+  /** LP shares held. Zero means there is nothing to withdraw. */
+  shares: number;
 }
 
 export async function fetchVaultPosition(address: string): Promise<VaultPosition> {
   const r = await fetch(`${BASE}/api/vaults/position/${encodeURIComponent(address)}`);
-  if (!r.ok) return { deposited: 0, sharePct: 0, earned: 0 };
+  if (!r.ok) return { deposited: 0, sharePct: 0, earned: 0, shares: 0 };
   return r.json();
 }
 

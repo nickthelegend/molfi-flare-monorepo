@@ -1,7 +1,6 @@
 import { shortAddress } from "@/components/leverx/CopyField";
 import { JazziconAvatar } from "@/components/leverx/comments/JazziconAvatar";
 import { useMarketComments } from "@/hooks/useMarketComments";
-import { mergeCommentsWithSimulated } from "@/lib/comments/simulated-comments";
 import { renderCommentBody } from "@/lib/comments/render-comment-text";
 import type { MarketComment } from "@/lib/comments/types";
 import { cn } from "@/lib/utils";
@@ -27,7 +26,7 @@ function FeaturedCommentItem({ comment }: { comment: MarketComment; }) {
 
 export function FeaturedCommentsFeed({ oracleId, className }: Props) {
   const { comments, loading } = useMarketComments(oracleId);
-  const preview = mergeCommentsWithSimulated(comments).slice(0, MARQUEE_COUNT);
+  const preview = comments.slice(0, MARQUEE_COUNT);
   const loop = preview.length > 0 ? [...preview, ...preview] : [];
 
   if (loading && preview.length === 0) {

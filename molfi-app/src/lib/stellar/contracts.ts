@@ -65,9 +65,19 @@ export const CONTRACTS = {
   clobSettlement:
     (import.meta.env.VITE_PREDICT_ESCROW_CONTRACT_ID as string | undefined) ??
     "0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067",
-  vault:
-    (import.meta.env.VITE_PREDICT_ESCROW_CONTRACT_ID as string | undefined) ??
-    "0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067",
+  /**
+   * The LP vault — its own contract, not an alias.
+   *
+   * This used to resolve to PredictEscrow, and `vaultDepositOnChain` issued a
+   * bare `FXRP.transfer` into it. Escrow accounts every stake in `pool`/`total`,
+   * so FXRP that arrives without going through `bet()` belongs to nobody: not
+   * the depositor, not any winner, and no function can pay it back out. Each
+   * "deposit" destroyed the user's funds while the UI reported a healthy
+   * position. MolfiLpVault mints shares and has a `withdraw`.
+   */
+  lpVault:
+    (import.meta.env.VITE_LP_VAULT_CONTRACT_ID as string | undefined) ??
+    "0x5F03D67518E1a43b1ED6CC65d736d733AC5a0E23",
 } as const;
 
 /**

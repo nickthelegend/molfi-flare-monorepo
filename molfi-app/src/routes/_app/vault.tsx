@@ -5,7 +5,7 @@ import { ArrowDownLeft, Coins, Loader2, Receipt, ShieldCheck, TrendingUp } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LivePriceChart } from "@/components/LivePriceChart";
-import { vaultDepositOnChain, fxrpBalance } from "@/lib/stellar/soroban";
+import { vaultDepositOnChain, vaultWithdrawAllOnChain, fxrpBalance } from "@/lib/stellar/soroban";
 import { useWallet } from "@/context/WalletContext";
 import {
   fetchVaults,
@@ -148,6 +148,32 @@ function VaultPage() {
    * the second as "already known". A ref flips immediately.
    */
   const inFlight = useRef(false);
+
+  const [withdrawing, setWithdrawing] = useState(false);
+  const withdrawInFlight = useRef(false);
+
+  /** Burn every share and take the FXRP back — deposit's missing other half. */
+  const handleWithdraw = async () => {
+    if (!address) return void connect();
+    if (withdrawInFlight.current) return;
+    withdrawInFlight.current = true;
+    setWithdrawing(true);
+    try {
+      const hash = await vaultWithdrawAllOnChain();
+      showTxSuccess("Withdrew your vault position", hash);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["vaults"] }),
+        queryClient.invalidateQueries({ queryKey: ["vault-activity"] }),
+        queryClient.invalidateQueries({ queryKey: ["vault-position", address] }),
+        queryClient.invalidateQueries({ queryKey: ["fxrp-balance", address] }),
+      ]);
+    } catch (e) {
+      showTxError(e);
+    } finally {
+      withdrawInFlight.current = false;
+      setWithdrawing(false);
+    }
+  };
 
   const handleDeposit = async () => {
     if (!address) return void connect();
@@ -301,8 +327,12 @@ function VaultPage() {
           {address && pos ? (
             <div className="space-y-1 rounded-lg border border-border bg-background p-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Your deposit</span>
+                <span className="text-muted-foreground">Your position</span>
                 <span className="font-mono">{usd(pos.deposited)} FXRP</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Shares</span>
+                <span className="font-mono">{usd(pos.shares ?? 0)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Pool share</span>
@@ -312,6 +342,23 @@ function VaultPage() {
                 <span className="text-muted-foreground">Fees earned</span>
                 <span className="font-mono text-[var(--long-text)]">+{usd(pos.earned)} FXRP</span>
               </div>
+              {/*
+                The way out. There was none: the old "deposit" transferred FXRP
+                into PredictEscrow, which has no function that could ever pay it
+                back. Offering a deposit without a withdrawal is not a vault.
+              */}
+              {(pos.shares ?? 0) > 0 ? (
+                <Button
+                  onClick={handleWithdraw}
+                  disabled={withdrawing}
+                  variant="outline"
+                  className="mt-2 w-full gap-2"
+                  size="sm"
+                >
+                  {withdrawing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Withdraw all
+                </Button>
+              ) : null}
             </div>
           ) : null}
           <p className="text-[11px] text-muted-foreground">

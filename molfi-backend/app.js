@@ -985,6 +985,10 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
         { $match: { vaultId: VAULT_ID } },
         { $group: { _id: null, principal: { $sum: "$amount" }, depositors: { $sum: 1 } } },
       ]).toArray();
+      // The LP side is a real contract now — shares, a price, and a way out.
+      // `principal` used to be a Mongo sum, which is why the payload carried
+      // `simulated: true`. It is a chain read.
+      const lp = await chain.lpVaultState();
       const principal = dep?.principal ?? 0;
       // FXRP escrowed across open markets — reported on its own key, never
       // folded into the LP pot.
@@ -1001,26 +1005,33 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
       const [posFee] = await Positions.aggregate([
         { $group: { _id: null, fees: { $sum: "$fee" } } },
       ]).toArray();
-      const fees = Math.max(0, r6((posFee?.fees ?? 0) + (feeAgg ? feeAgg.staked * FEE_RATE : 0)));
-      const tvl = r6(principal + fees);
-      // Monotonic in fees and never below 1, which is what "NAV per share since
-      // inception" is supposed to mean.
-      const sharePrice = principal > 0 ? (principal + fees) / principal : 1;
+      // Fees the venue has generated on-chain. Reported beside the vault's own
+      // `lifetimeFees` (what has actually been paid IN to the vault) rather
+      // than added to it — the difference is fees earned but not yet swept.
+      const feesGenerated = Math.max(
+        0,
+        r6((posFee?.fees ?? 0) + (feeAgg ? feeAgg.staked * FEE_RATE : 0)),
+      );
       const lpCount = dep?.depositors ?? 0;
       const data = [
         {
           _id: VAULT_ID,
           name: "Molfi LP Vault",
           asset: "FXRP",
-          tvl,
+          address: chain.CONTRACTS.lpVault,
+          // Every figure below is a chain read from MolfiLpVault.
+          tvl: r6(lp.tvl),
+          totalShares: r6(lp.totalShares),
+          sharePrice: Math.round(lp.sharePrice * 1e4) / 1e4,
+          feesEarned: r6(lp.lifetimeFees),
+          apr:
+            lp.tvl > lp.lifetimeFees && lp.lifetimeFees > 0
+              ? Math.round((lp.lifetimeFees / (lp.tvl - lp.lifetimeFees)) * 1000) / 10
+              : 0,
           escrowTvl: r6(escrowTvl),
-          feesEarned: r6(fees),
-          sharePrice: Math.round(sharePrice * 1e4) / 1e4,
-          apr: principal > 0 ? Math.round((fees / principal) * 1000) / 10 : 0,
+          feesGenerated,
           depositors: lpCount,
           feeVolume: r6((feeAgg?.staked || 0) * FEE_RATE),
-          // LP accounting is off-chain; the escrow figure beside it is real.
-          simulated: true,
         },
       ];
       vaultCache = { ts: Date.now(), data };
@@ -1064,26 +1075,39 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
     res.json({ ok: true, deposited: amt });
   });
 
+  /**
+   * A wallet's vault position, read from MolfiLpVault.
+   *
+   * This was a sum over Mongo deposit rows, which reported a position to a
+   * wallet that held no shares and could not have withdrawn a thing. `shares`
+   * and `assets` now come from the contract, and `earned` is the difference —
+   * real yield, not a hardcoded zero.
+   */
   app.get("/api/vaults/position/:address", async (req, res) => {
+    const address = String(req.params.address || "");
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return res.status(400).json({ error: "address must be a 20-byte hex address" });
+    }
     try {
-      const [me] = await VaultDeposits.aggregate([
-        { $match: { vaultId: VAULT_ID, address: req.params.address } },
-        { $group: { _id: null, mine: { $sum: "$amount" } } },
-      ]).toArray();
-      const [tot] = await VaultDeposits.aggregate([
-        { $match: { vaultId: VAULT_ID } },
-        { $group: { _id: null, all: { $sum: "$amount" } } },
-      ]).toArray();
-      const mine = me?.mine ?? 0;
-      const all = tot?.all ?? 0;
+      const [pos, state] = await Promise.all([
+        chain.lpVaultPosition(address),
+        chain.lpVaultState(),
+      ]);
       res.json({
-        deposited: r6(mine),
-        sharePct: all > 0 ? Math.round((mine / all) * 1000) / 10 : 0,
-        earned: 0,
-        shares: r6(mine),
+        shares: r6(pos.shares),
+        // What the shares are worth right now.
+        deposited: r6(pos.assets),
+        sharePct:
+          state.totalShares > 0
+            ? Math.round((pos.shares / state.totalShares) * 1000) / 10
+            : 0,
+        // Shares are minted 1:1 with FXRP at parity, so anything above the
+        // share count is fee accrual this holder has earned.
+        earned: r6(Math.max(0, pos.assets - pos.shares)),
       });
-    } catch {
-      res.json({ deposited: 0, sharePct: 0, earned: 0 });
+    } catch (e) {
+      // Never invent a position — say the read failed.
+      res.status(503).json({ error: `could not read the vault: ${e.message.split("\n")[0]}` });
     }
   });
 
