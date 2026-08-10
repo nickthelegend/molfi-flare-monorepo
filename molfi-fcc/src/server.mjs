@@ -14,7 +14,7 @@
  * container, which is a development posture, not a security claim.
  */
 import { createServer } from "node:http";
-import { createPublicClient, defineChain, http as viemHttp, getAddress } from "viem";
+import { createPublicClient, defineChain, encodeAbiParameters, http as viemHttp, getAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { enclaveKeypair } from "./seal.mjs";
 import { openBook, openDigest } from "./open-book.mjs";
@@ -27,6 +27,7 @@ const BOOK = process.env.SEALED_BID_BOOK;
 export const OP_TYPE = "MOLFI";
 export const OP_SEAL_KEY = "SEAL_KEY";
 export const OP_OPEN_BOOK = "OPEN_BOOK";
+export const OP_OPENINGS = "OPENINGS";
 
 // A fixed key across restarts is required, not a nicety: bids already sealed to
 // the previous key become permanently unopenable if this rotates mid-market.
@@ -145,7 +146,18 @@ export async function handleOpenBook({ marketId }) {
   // signMessage would prefix it twice and the contract would recover garbage.
   const signature = await signer.sign({ hash: digest });
 
+  // The ABI tuple `SealedBidBook.openMarketFromTee` decodes. On the FCC wire
+  // this IS the whole response — tee-node signs it and that signed pair is the
+  // authorisation. Here it rides alongside the richer JSON, so a caller can take
+  // either settlement path without a second round trip.
+  const resultData = encodeAbiParameters(
+    [{ type: "address" }, { type: "bytes32" }, { type: "uint256" },
+     { type: "uint256" }, { type: "uint32" }, { type: "bytes32" }],
+    [getAddress(BOOK), marketId, result.yesPool, result.noPool, result.bidCount, result.openingsRoot],
+  );
+
   return {
+    resultData,
     marketId,
     yesPool: result.yesPool.toString(),
     noPool: result.noPool.toString(),
@@ -178,6 +190,9 @@ export async function dispatch(opType, opCommand, payload = {}) {
       // Public by design — clients need it to seal, and it reveals nothing.
       return { publicKey: enclave.publicKey, teeSigner: signer.address, chainId: CHAIN_ID };
     case OP_OPEN_BOOK:
+    // OPENINGS exists because on the FCC wire OPEN_BOOK can only return the ABI
+    // tuple; over this convenience API both names give the full picture.
+    case OP_OPENINGS:
       return handleOpenBook(payload);
     default: {
       const e = new Error(`unsupported opCommand ${opCommand}`);
@@ -207,7 +222,7 @@ export function createExtensionServer() {
         ok: true,
         extension: "molfi-sealed-book",
         opType: OP_TYPE,
-        commands: [OP_SEAL_KEY, OP_OPEN_BOOK],
+        commands: [OP_SEAL_KEY, OP_OPEN_BOOK, OP_OPENINGS],
         enclavePublicKey: enclave.publicKey,
         teeSigner: signer.address,
         book: BOOK ?? null,

@@ -24,13 +24,14 @@
 import { bytesToHex } from "../base/encoding.js";
 import type { Framework, HandlerResult } from "../base/types.js";
 import { privateKeyToAccount } from "viem/accounts";
-import type { Hex } from "viem";
+import { encodeAbiParameters, type Hex } from "viem";
 
 import { decodeMarketId } from "./abi.js";
 import { BookReader } from "./chain.js";
 import {
   loadConfig,
   OP_COMMAND_OPEN_BOOK,
+  OP_COMMAND_OPENINGS,
   OP_COMMAND_SEAL_KEY,
   OP_TYPE_MOLFI,
   type MolfiConfig,
@@ -87,6 +88,7 @@ let bannerShown = false;
 export function register(framework: Framework): void {
   framework.handle(OP_TYPE_MOLFI, OP_COMMAND_SEAL_KEY, handleSealKey);
   framework.handle(OP_TYPE_MOLFI, OP_COMMAND_OPEN_BOOK, handleOpenBook);
+  framework.handle(OP_TYPE_MOLFI, OP_COMMAND_OPENINGS, handleOpenings);
 
   // Once per process. The container registers once; test suites construct a
   // Server per case, and repeating the key on every one buries the output.
@@ -123,7 +125,7 @@ export function reportState(): unknown {
   return {
     extension: "molfi-sealed-book",
     opType: OP_TYPE_MOLFI,
-    commands: [OP_COMMAND_SEAL_KEY, OP_COMMAND_OPEN_BOOK],
+    commands: [OP_COMMAND_SEAL_KEY, OP_COMMAND_OPEN_BOOK, OP_COMMAND_OPENINGS],
     enclavePublicKey: enclave.publicKey,
     teeSigner: signer.address,
     book: cfg.book,
@@ -158,68 +160,60 @@ export function handleSealKey(_msg: string): HandlerResult {
 }
 
 /**
- * MOLFI/OPEN_BOOK — payload is a market id (raw bytes32 or `{"marketId":…}`).
+ * Everything both open-paths need, computed once.
  *
- * Everything except the id is read from chain, so a caller cannot substitute a
- * bidder or an amount.
+ * Returns either a failure string or the opened book plus what the chain says
+ * about it, so the two handlers cannot drift on the guards that matter.
  */
-export async function handleOpenBook(msg: string): Promise<HandlerResult> {
-  // 1. Decode
+async function computeOpening(
+  msg: string,
+): Promise<
+  | { error: string }
+  | {
+      marketId: Hex;
+      book: Hex;
+      result: ReturnType<typeof openBook>;
+      expectedSigner: string;
+    }
+> {
   let marketId: Hex;
   try {
     marketId = decodeMarketId(msg);
   } catch (e) {
-    return fail(`decoding request: ${e instanceof Error ? e.message : String(e)}`);
+    return { error: `decoding request: ${e instanceof Error ? e.message : String(e)}` };
   }
 
-  // 2. Validate against chain
   let summary;
   let bids;
   let expectedSigner;
   let closeInfo;
+  let reader;
   try {
-    const r = bookReader();
+    reader = bookReader();
     [summary, bids, expectedSigner, closeInfo] = await Promise.all([
-      r.summary(marketId), r.bids(marketId), r.teeSigner(), r.closeInfo(marketId),
+      reader.summary(marketId), reader.bids(marketId), reader.teeSigner(), reader.closeInfo(marketId),
     ]);
   } catch (e) {
-    return fail(`reading book: ${e instanceof Error ? e.message : String(e)}`);
+    return { error: `reading book: ${e instanceof Error ? e.message : String(e)}` };
   }
 
   // THE MARKET MUST BE CLOSED. This is the whole product.
   //
-  // Opening returns every bidder's plaintext side. `openMarket` already refuses
+  // Opening reveals every bidder's plaintext side. `openMarket` already refuses
   // an early opening with NotClosedYet — but that protects settlement, not
-  // secrecy: the response still leaves the enclave. Without this check anyone
-  // who can reach the extension reads the live book and front-runs it, which is
-  // precisely what a sealed book exists to prevent. The confidentiality is
-  // worth nothing if the enclave will simply tell you.
+  // secrecy: the response has already left the enclave by the time the contract
+  // says no. Without this, anyone who can reach the extension reads the live
+  // book and front-runs it.
   if (closeInfo.now < closeInfo.closeTs) {
-    return fail(
-      `market is still open — closes in ${closeInfo.closeTs - closeInfo.now}s. ` +
+    return {
+      error:
+        `market is still open — closes in ${closeInfo.closeTs - closeInfo.now}s. ` +
         "The book cannot be opened before close.",
-    );
+    };
   }
-  if (bids.length === 0) return fail("no sealed bids for this market");
-  if (summary.opened) return fail("book is already opened");
+  if (bids.length === 0) return { error: "no sealed bids for this market" };
 
-  // Refuse to produce a signature the contract will not accept.
-  //
-  // The enclave's signing key is generated in here. Rebuild the image, or
-  // restart without a pinned key, and this address changes while the contract
-  // still trusts the old one — sealing keeps working and bids keep landing, so
-  // nothing looks wrong until close, when `openMarket` reverts with
-  // BadSignature and every stake in the book is stuck behind an opening that
-  // cannot be accepted. Catching it here turns a frozen market into one line of
-  // output and one `setTeeSigner` call.
-  if (expectedSigner.toLowerCase() !== signer.address.toLowerCase()) {
-    return fail(
-      `tee signer mismatch: the book accepts ${expectedSigner} but this enclave ` +
-        `signs as ${signer.address} — run set-tee-signer.ts before opening`,
-    );
-  }
-
-  // 3. Execute — the confidential part. Plaintext sides exist only in here.
+  // The confidential part. Plaintext sides exist only in here.
   const result = openBook(enclave.privateKey, marketId, bids);
 
   // The contract will reject an opening that fails to reconcile. Checking the
@@ -227,17 +221,74 @@ export async function handleOpenBook(msg: string): Promise<HandlerResult> {
   // the chain moved under the read, not that the decryption was wrong.
   const reported = result.yesPool + result.noPool;
   if (reported !== summary.totalEscrowed) {
-    return fail(
-      `conservation failed: pools ${reported} vs escrow ${summary.totalEscrowed}`,
-    );
+    return { error: `conservation failed: pools ${reported} vs escrow ${summary.totalEscrowed}` };
   }
   if (result.bidCount !== summary.bidCount) {
-    return fail(`bid count mismatch: read ${result.bidCount} vs book ${summary.bidCount}`);
+    return { error: `bid count mismatch: read ${result.bidCount} vs book ${summary.bidCount}` };
   }
+
+  return { marketId, book: reader.book, result, expectedSigner };
+}
+
+/**
+ * MOLFI/OPEN_BOOK — payload is a market id (raw bytes32 or `{"marketId":…}`).
+ *
+ * THE RESPONSE IS CONSUMED BY A CONTRACT, so it is the ABI tuple
+ * `SealedBidBook.openMarketFromTee` decodes and nothing else. tee-node signs
+ * whatever an extension returns here with the node's attested identity key, and
+ * that signed pair — data plus signature — IS the authorisation. A JSON blob
+ * would be just as signed and completely unusable.
+ *
+ * The per-bid openings and Merkle proofs live in MOLFI/OPENINGS instead; there
+ * is no room for them here and they are not what settles the market.
+ *
+ * Everything except the id is read from chain, so a caller cannot substitute a
+ * bidder or an amount.
+ */
+export async function handleOpenBook(msg: string): Promise<HandlerResult> {
+  const opened = await computeOpening(msg);
+  if ("error" in opened) return fail(opened.error);
+  const { marketId, book, result } = opened;
+
+  openedCount++;
+  lastMarketOpened = marketId;
+  lastBidCount = result.bidCount;
+
+  // The book address is inside the signed bytes so a result meant for one
+  // deployment cannot be relayed into another that trusts the same machine.
+  return [
+    encodeAbiParameters(
+      [
+        { type: "address" }, { type: "bytes32" }, { type: "uint256" },
+        { type: "uint256" }, { type: "uint32" }, { type: "bytes32" },
+      ],
+      [book, marketId, result.yesPool, result.noPool, result.bidCount, result.openingsRoot],
+    ),
+    1,
+    null,
+  ];
+}
+
+/**
+ * MOLFI/OPENINGS — the per-bid sides and Merkle proofs, for claiming.
+ *
+ * Same close guard as OPEN_BOOK: these ARE the book, and publishing them early
+ * would leak it just as completely.
+ *
+ * Also carries a signature over `SealedBidBook.openDigest` for the older
+ * `openMarket` path. That signature is only meaningful if the book still trusts
+ * this enclave's signing key, so a drift is reported rather than hidden — the
+ * TEE-node path does not need it at all, and refusing outright would block a
+ * settlement that has another way through.
+ */
+export async function handleOpenings(msg: string): Promise<HandlerResult> {
+  const opened = await computeOpening(msg);
+  if ("error" in opened) return fail(opened.error);
+  const { marketId, book, result, expectedSigner } = opened;
 
   const digest = openDigest({
     chainId: cfg.chainId,
-    book: bookReader().book,
+    book,
     marketId,
     yesPool: result.yesPool,
     noPool: result.noPool,
@@ -246,28 +297,24 @@ export async function handleOpenBook(msg: string): Promise<HandlerResult> {
   });
   // Sign the digest itself — openDigest already applied the EIP-191 prefix, so
   // signMessage would prefix it twice and the contract would recover garbage.
-  let signature: Hex;
+  let signature: Hex | null = null;
   try {
     signature = await signer.sign({ hash: digest });
-  } catch (e) {
-    return fail(`signing opening: ${e instanceof Error ? e.message : String(e)}`);
+  } catch {
+    signature = null;
   }
 
-  openedCount++;
-  lastMarketOpened = marketId;
-  lastBidCount = result.bidCount;
-
-  // 4. Respond
   return ok({
     marketId,
+    book,
     yesPool: result.yesPool.toString(),
     noPool: result.noPool.toString(),
     bidCount: result.bidCount,
     openingsRoot: result.openingsRoot,
     signature,
     teeSigner: signer.address,
-    // Openings are published so bettors can build claim proofs. Safe now and
-    // only now: the market is closed, so nothing here can be front-run.
+    signerAccepted: expectedSigner.toLowerCase() === signer.address.toLowerCase(),
+    bookTrusts: expectedSigner,
     openings: result.openings.map((o) => ({
       index: o.index,
       side: o.side,

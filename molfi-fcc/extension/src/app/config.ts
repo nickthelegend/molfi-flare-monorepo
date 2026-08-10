@@ -12,6 +12,16 @@ export const VERSION = "0.2.0-molfi";
 export const OP_TYPE_MOLFI = "MOLFI";
 export const OP_COMMAND_SEAL_KEY = "SEAL_KEY";
 export const OP_COMMAND_OPEN_BOOK = "OPEN_BOOK";
+/**
+ * The claim-proof lookup, split out from OPEN_BOOK.
+ *
+ * OPEN_BOOK's response is what tee-node signs and `openMarketFromTee` decodes,
+ * so it has to be exactly the ABI tuple the contract expects — no room for the
+ * per-bid openings and Merkle proofs a bettor needs in order to claim. Those
+ * come from here instead. Same close guard; publishing them earlier would leak
+ * the book just as surely.
+ */
+export const OP_COMMAND_OPENINGS = "OPENINGS";
 
 export interface MolfiConfig {
   chainId: number;

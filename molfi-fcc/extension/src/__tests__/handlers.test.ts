@@ -84,6 +84,18 @@ describe("MOLFI/OPEN_BOOK payload decoding", () => {
   });
 });
 
+describe("MOLFI/OPEN_BOOK response shape", () => {
+  it("is documented as the ABI tuple, not JSON", () => {
+    // The response is consumed by `SealedBidBook.openMarketFromTee`, which
+    // abi.decodes it. tee-node signs whatever comes back, so a JSON blob would
+    // be just as signed and completely unusable on-chain. The happy path needs
+    // a live chain (see molfi-contracts/scripts/fcc-e2e-local.ts); what is
+    // assertable here is that the two commands are distinct, so nobody
+    // "simplifies" them back into one.
+    expect(handlers.handleOpenBook).not.toBe(handlers.handleOpenings);
+  });
+});
+
 describe("MOLFI/OPEN_BOOK configuration", () => {
   it("fails cleanly when no book is configured", async () => {
     handlers.resetState(env()); // no SEALED_BID_BOOK
@@ -97,7 +109,7 @@ describe("reported state", () => {
   it("exposes the sealing key and signer, and no market's split", () => {
     const state = handlers.reportState() as Record<string, unknown>;
     expect(state.extension).toBe("molfi-sealed-book");
-    expect(state.commands).toEqual(["SEAL_KEY", "OPEN_BOOK"]);
+    expect(state.commands).toEqual(["SEAL_KEY", "OPEN_BOOK", "OPENINGS"]);
     expect(String(state.enclavePublicKey)).toMatch(/^0x0[23][0-9a-f]{64}$/);
     expect(state.openedCount).toBe(0);
 

@@ -34,13 +34,15 @@
   "teeSigner": "0x6a066930CD29B1e3f9c697B7dc13cc18a0824069",
   "fcc": {
     "flareTeeManager": "0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE",
-    "extensionId": "0x00000000000000000000000000000000000000000000000000000000000101cc",
-    "extensionIdDecimal": 65996,
-    "instructionSender": "0x64799fc225db28d52cAe8593214E8AB372C658A3",
-    "teeMachineId": "0xD114B9B601B77D5Fa1EBdc82bdcafCdB7129f205",
-    "teeMachineStatus": "PRODUCTION",
+    "extensionId": "0x000000000000000000000000000000000000000000000000000000000001023c",
+    "extensionIdDecimal": 66108,
+    "instructionSender": "0xF91a16Ae48609927EA9220508dda9DEA2149B846",
+    "teeMachineId": "0x33ed6fba3FC0b8A9bD656AfAaa8dd1915DEDB201",
+    "teeMachineStatus": "INITIALIZED (availability tx unfunded)",
     "simulatedTee": true,
-    "registeredAt": "2026-08-07T05:38:55Z"
+    "registeredAt": "2026-08-07T05:38:55Z",
+    "molfiInstructionSender": "0xF91a16Ae48609927EA9220508dda9DEA2149B846",
+    "extProxyUrl": "https://congressional-spin-precise-speak.trycloudflare.com"
   },
   "teeMachine": "0xD114B9B601B77D5Fa1EBdc82bdcafCdB7129f205"
 }

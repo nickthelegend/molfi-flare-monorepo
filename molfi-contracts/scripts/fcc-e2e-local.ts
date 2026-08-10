@@ -22,7 +22,7 @@ import { id, Wallet } from "ethers";
 // @ts-expect-error — compiled image modules, no types emitted alongside
 import { enclaveKeypair, sealSide } from "../../molfi-fcc/extension/dist/app/seal.js";
 // @ts-expect-error
-import { handleOpenBook, resetState } from "../../molfi-fcc/extension/dist/app/handlers.js";
+import { handleOpenBook, handleOpenings, resetState } from "../../molfi-fcc/extension/dist/app/handlers.js";
 
 const DAY = 86_400;
 const XRP_USD = "0x015852502f55534400000000000000000000000000";
@@ -124,9 +124,36 @@ async function main() {
   // --- The handler the container serves ------------------------------------
   // The on-chain route passes abi.encode(bytes32); prove that path, not a
   // convenience JSON one.
-  const result = unwrap(await handleOpenBook(MKT));
-  const yesPool = BigInt(result.yesPool);
-  const noPool = BigInt(result.noPool);
+  //
+  // OPEN_BOOK's response is consumed by a CONTRACT, so it is the ABI tuple
+  // openMarketFromTee decodes — decoding it as JSON is exactly the mistake this
+  // asserts against.
+  const [rawData, status0, err0] = await handleOpenBook(MKT);
+  if (status0 !== 1 || !rawData) throw new Error(`OPEN_BOOK failed: ${err0}`);
+  const [decodedBook, decodedMkt, yesPool, noPool, decodedCount, decodedRoot] =
+    ethers.AbiCoder.defaultAbiCoder().decode(
+      ["address", "bytes32", "uint256", "uint256", "uint32", "bytes32"],
+      rawData,
+    );
+  if (decodedBook !== bookAddr || decodedMkt !== MKT) {
+    fail("OPEN_BOOK tuple", `book ${decodedBook} market ${decodedMkt}`);
+  } else {
+    ok("OPEN_BOOK returns the ABI tuple the contract decodes");
+  }
+
+  // The per-bid sides and Merkle proofs come from OPENINGS — there is no room
+  // for them in the signed tuple, and they are not what settles the market.
+  const result = unwrap(await handleOpenings(MKT));
+  if (
+    BigInt(result.yesPool) !== yesPool ||
+    BigInt(result.noPool) !== noPool ||
+    result.openingsRoot !== decodedRoot ||
+    result.bidCount !== Number(decodedCount)
+  ) {
+    fail("OPEN_BOOK/OPENINGS disagree", `${result.yesPool}/${result.noPool} vs ${yesPool}/${noPool}`);
+  } else {
+    ok("OPENINGS agrees with the signed tuple");
+  }
 
   if (yesPool === fxrp("350") && noPool === fxrp("400")) {
     ok(`handler opened the book: YES ${ethers.formatUnits(yesPool, 6)} · NO ${ethers.formatUnits(noPool, 6)}`);
@@ -167,7 +194,13 @@ async function main() {
     }
   }
 
-  // --- The guard that stops a silent BadSignature ---------------------------
+  // --- Signer drift is now REPORTED, not fatal --------------------------------
+  // It used to abort OPEN_BOOK. That was right when `teeSigner` was the only way
+  // to authorise an opening; it is wrong now. `openMarketFromTee` is authorised
+  // by the registered TEE MACHINE, so a stale `teeSigner` no longer blocks
+  // settlement — refusing outright would strand a market that has another way
+  // through. OPENINGS reports the mismatch instead, and the keeper checks the
+  // recovered signer against the book before it spends gas.
   const stale = await (
     await ethers.getContractFactory("SealedBidBook")
   ).deploy(await token.getAddress(), await market.getAddress(), Wallet.createRandom().address, admin.address);
@@ -178,15 +211,19 @@ async function main() {
   await stale.connect(alice).sealBid(
     MKT2, fxrp("10"), sealSide(enclave.publicKey, MKT2, alice.address, 0),
   );
-  // Past close, so the signer check is what rejects this and not the close one.
   await time.increaseTo(close2 + 1);
   resetState({ ...env, SEALED_BID_BOOK: await stale.getAddress() });
-  const [, status, err] = await handleOpenBook(MKT2);
-  if (status === 0 && /tee signer mismatch/.test(String(err))) {
-    ok("refuses to sign for a book that trusts a different key");
+
+  const staleOpenings = unwrap(await handleOpenings(MKT2));
+  if (staleOpenings.signerAccepted === false && staleOpenings.bookTrusts !== teeSigner) {
+    ok("reports signer drift instead of hiding it, without blocking the TEE path");
   } else {
-    fail("tee-signer guard", `status ${status}, err ${err}`);
+    fail("signer-drift reporting", JSON.stringify(staleOpenings.signerAccepted));
   }
+  // …and OPEN_BOOK still succeeds, because the machine path does not need it.
+  const [staleData, staleStatus] = await handleOpenBook(MKT2);
+  if (staleStatus === 1 && staleData) ok("OPEN_BOOK still serves the TEE path under signer drift");
+  else fail("OPEN_BOOK under drift", `status ${staleStatus}`);
 
   console.log(
     process.exitCode

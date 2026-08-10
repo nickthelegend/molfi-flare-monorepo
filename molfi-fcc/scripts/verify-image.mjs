@@ -51,9 +51,10 @@ const s = state.state ?? {};
 if (s.extension === "molfi-sealed-book") ok(`serving "${s.extension}" (not the scaffold sample)`);
 else bad(`extension is "${s.extension}" — the Molfi handler is not in this image`);
 
-if (Array.isArray(s.commands) && s.commands.join() === "SEAL_KEY,OPEN_BOOK") {
-  ok(`commands ${s.commands.join(" · ")}`);
-} else bad(`commands are ${JSON.stringify(s.commands)}`);
+const REQUIRED = ["SEAL_KEY", "OPEN_BOOK", "OPENINGS"];
+const missing = REQUIRED.filter((c) => !s.commands?.includes(c));
+if (!missing.length) ok(`commands ${s.commands.join(" · ")}`);
+else bad(`missing command(s): ${missing.join(", ")} — got ${JSON.stringify(s.commands)}`);
 
 // --- 2. The scaffold sample must be GONE, not merely unused ------------------
 const greeting = inContainer(`
