@@ -288,3 +288,63 @@ the README publishes for independent verification. Trading a verifiable artifact
 for an uncertain re-registration is the wrong trade the day before submission.
 The real fix is a dedicated RPC for the enclave. Both the README and the script's
 failure message now say exactly this instead of implying the path is unproven.
+
+---
+
+# ROUND 3 — executing the plan against the running product
+
+**Browser used:** Claude in Chrome was **not connected** (no registered browser
+instance — the extension is not installed/signed in on this machine). Phase 2
+ran instead in the in-app Chromium against the same live app at `:8091`, using
+the same console and network inspection. Stated rather than substituted quietly.
+
+## The defect that mattered
+
+**A10 / C13 / E6 — the vault was destroying deposits. FAIL → FIXED.**
+
+`CONTRACTS.vault` aliased to **PredictEscrow**, and `vaultDepositOnChain` issued
+a bare `FXRP.transfer` into it. Escrow accounts every stake in `pool`/`total`, so
+FXRP arriving outside `bet()` belonged to nobody — not the depositor, not any
+winner — and no function could return it. Every "Deposit to vault" click
+permanently destroyed the user's FXRP while the UI showed a healthy position and
+`/api/vaults` returned `simulated: true` beside a Mongo sum.
+
+Fixed with `MolfiLpVault` (Coston2 `0x5F03D67518E1a43b1ED6CC65d736d733AC5a0E23`):
+shares on deposit, a share price that rises as fees are paid in, and the
+`withdraw` that never existed. Its own test caught a bug pre-deploy —
+`withdrawAll` called `this.withdraw()`, making the vault the `msg.sender`, so
+every full exit reverted `InsufficientShares(0, n)`.
+
+Re-verified in the browser against the live chain: **0.3 FXRP deposited → 0.3
+shares → withdraw all → wallet back to exactly its pre-deposit balance**, vault
+empty. `/api/vaults` and `/api/vaults/position` are chain reads; an unreadable
+vault 503s rather than reporting zeros.
+
+## Other FAILs found and fixed
+
+| Item | Defect | Fix |
+|---|---|---|
+| B6 / A7 | `/api/onchain/markets/:id` returned **404 "not found" for a live, funded, on-screen market** — `getMarketFull` ended in `catch { return null }`, so a rate-limited RPC read as absence. Reproduced 3× against the live node. | Absence returns null, failure throws; route 503s "could not reach Coston2" and keeps 404 for a genuinely unknown id. Backend client given retry/backoff. Test pins both branches. |
+| Mocks | `SimulatedComments` — invented chatter attributed to 32-byte **Sui** addresses, left from the deleted Sui subsystem. The merge was already neutered so nothing rendered it. | Fixtures, the merge indirection and the always-false `isSimulatedComment` guards all deleted. |
+
+## Verified this round
+
+- **Endpoints** B1–B33: 18-item final sweep 18/18, plus comments B28–B32 with
+  authorization (a stranger deleting another's comment gets **403**) and the
+  like toggle on and off. B33 Pinata fails loudly (400), never silently.
+- **E1 standard bet**: 0.1 FXRP → pools YES 0.05→0.15, pot 0.2, balance −0.1,
+  position 0.1 — UI, API and chain agree to the atom.
+- **F1–F5 validations**: "Enter an amount." / "greater than zero" / "You have
+  0.59 FXRP." / "smallest bet is 0.000001 FXRP" / "6 decimal places", each with
+  the button disabled.
+- **A8** unknown hex64 → "Couldn't load this market", no stuck skeleton.
+  **A17** unknown route → real 404 page. **A14** /pitch renders.
+- Suites: contracts **152**, fcc **18**, backend **33**, app **35**, sdk **15**,
+  mcp **12** = **265**, zero type errors, clean build.
+
+## Still not a PASS
+
+| Item | Status |
+|---|---|
+| B33 / D10 Pinata | **UNTESTED** — `PINATA_JWT` does not exist. The endpoint fails loudly; the upload path cannot be exercised. |
+| Instruction path (§J) | **BLOCKED** — unchanged from round 2: the enclave reads a rate-limited public RPC inside tee-node's hard 2s budget. Needs a dedicated RPC endpoint. |
