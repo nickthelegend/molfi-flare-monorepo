@@ -19,7 +19,7 @@
  *      reads through `getPrice`, which returns 18-decimal values normalized by
  *      the oracle contract, so no scale factor is ever hardcoded here.
  */
-import { createPublicClient, defineChain, http, getAddress } from "viem";
+import { createPublicClient, decodeEventLog, defineChain, http, getAddress } from "viem";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -250,6 +250,90 @@ export async function readEscrowLogs(fromBlock) {
   for (const r of rows) r.ts = times.get(r.blockNumber) ?? Date.now();
 
   return { rows, nextBlock: from, caughtUp: from > head };
+}
+
+/**
+ * The explorer's log API, used for the one thing `eth_getLogs` cannot do here:
+ * reach back further than the last few hours.
+ *
+ * The 30-block cap above is fine for keeping up and hopeless for catching up.
+ * The escrow was deployed millions of blocks into Coston2's history, and at 30
+ * blocks a call with 40 calls a tick, a backfill from the deploy would need tens
+ * of thousands of ticks — which is why the cold-start cursor gives up and begins
+ * at head-6000, leaving every earlier bet permanently invisible to the
+ * leaderboard.
+ *
+ * Blockscout serves the same logs paginated with no block-range limit. Ported
+ * from _references/flare-prediction-market, which hit the identical wall.
+ *
+ * ONE DIFFERENCE FROM THE REFERENCE, AND IT MATTERS: it matched on
+ * `item.decoded.method_call`, which the explorer only populates for VERIFIED
+ * contracts. Molfi's are not verified, so `decoded` comes back `null` on every
+ * row and that approach silently indexes nothing — no error, just an empty
+ * leaderboard. Topics and data are always present, so they are decoded here
+ * with the same ABI the RPC path uses.
+ */
+const EXPLORER_API = process.env.MOLFI_EXPLORER_API || `${"https://coston2-explorer.flare.network"}/api/v2`;
+const EXPLORER_MAX_PAGES = Number(process.env.MOLFI_EXPLORER_MAX_PAGES || 100);
+
+export async function readEscrowLogsViaExplorer(fromBlock = 0) {
+  const address = getAddress(CONTRACTS.predictEscrow);
+  const rows = [];
+  let url = `${EXPLORER_API}/addresses/${address}/logs`;
+  let pages = 0;
+  let truncated = false;
+
+  while (url && pages < EXPLORER_MAX_PAGES) {
+    pages += 1;
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`explorer ${res.status} on ${url}`);
+    const body = await res.json();
+    const items = body.items ?? [];
+
+    let reachedFloor = false;
+    for (const item of items) {
+      const blockNumber = Number(item.block_number);
+      if (blockNumber < fromBlock) {
+        // Results come newest-first, so anything below the floor means the rest
+        // of this page — and every later page — is already indexed.
+        reachedFloor = true;
+        continue;
+      }
+      let decoded;
+      try {
+        decoded = decodeEventLog({ abi: ESCROW_EVENTS, topics: item.topics, data: item.data });
+      } catch {
+        continue; // an event this ABI does not describe
+      }
+      if (decoded.eventName !== "Bet" && decoded.eventName !== "Redeem") continue;
+
+      const kind = decoded.eventName === "Bet" ? "bet" : "redeem";
+      const raw = kind === "bet" ? decoded.args.amount : decoded.args.payout;
+      rows.push({
+        _id: `${item.transaction_hash}:${Number(item.index)}`,
+        kind,
+        market: decoded.args.marketId,
+        address: getAddress(decoded.args.bettor),
+        outcome: kind === "bet" ? Number(decoded.args.outcome) : null,
+        amount: Number(raw) / U,
+        blockNumber,
+        txHash: item.transaction_hash,
+        // Included in the payload — the RPC path has to fetch each block
+        // separately for this.
+        ts: new Date(item.block_timestamp).getTime(),
+      });
+    }
+
+    if (reachedFloor || !body.next_page_params) break;
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(body.next_page_params).map(([k, v]) => [k, String(v)])),
+    ).toString();
+    url = `${EXPLORER_API}/addresses/${address}/logs?${qs}`;
+    if (pages + 1 >= EXPLORER_MAX_PAGES) truncated = true;
+  }
+
+  // A silent cap would read as "fully backfilled" when it is not.
+  return { rows, pages, truncated };
 }
 
 export const FXRP_ABI = [

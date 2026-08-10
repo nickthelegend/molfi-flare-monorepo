@@ -36,3 +36,6 @@ Thumbs.db
 # hardhat
 cache_hardhat/
 ignition/deployments/chain-31337/
+
+# Reference projects read during porting — not ours to vendor.
+_references/

@@ -14,6 +14,7 @@
  */
 import express from "express";
 import { randomBytes, createHash } from "node:crypto";
+import * as web2json from "./web2json.js";
 
 const FEE_RATE = 0.02; // 2% trading fee → LP vault
 export const VAULT_ID = "molfi-lp";
@@ -80,6 +81,7 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
   const OnchainTrades = db.collection("onchainTrades");
   const OnchainMarkets = db.collection("onchainMarkets");
   const Comments = db.collection("comments");
+  const Web2Attestations = db.collection("web2Attestations");
 
   const app = express();
   app.use((req, res, next) => {
@@ -521,6 +523,104 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       res.status(503).json({ error: e.message });
     }
   });
+
+  // ── Web2Json feeds (Flare Data Connector) ─────────────────────────────────
+  // Settlement values for things FTSO has no feed for. The relayer holds no
+  // privileged position — `Web2JsonOracle.submitAttestation` accepts a proof
+  // from any address and re-checks both the Merkle proof and that the request
+  // matches what the feed was registered against — so these endpoints are a
+  // convenience, not a trust boundary.
+  const WEB2_ORACLE = process.env.MOLFI_WEB2_ORACLE || "";
+
+  /** Combine the local feed spec with what the contract currently holds. */
+  async function feedState(feed) {
+    const onChain = await web2json.readFeed(WEB2_ORACLE, feed.feedId);
+    const last = await Web2Attestations.find({ feedId: feed.feedId })
+      .sort({ attestedAt: -1 })
+      .limit(1)
+      .toArray();
+    return {
+      ...onChain,
+      request: feed.request,
+      source: feed.request.url,
+      lastAttestation: last[0] ?? null,
+    };
+  }
+
+  app.get("/api/web2/feeds", async (_req, res) => {
+    if (!WEB2_ORACLE) {
+      return res.status(503).json({ error: "MOLFI_WEB2_ORACLE not configured" });
+    }
+    try {
+      res.json({
+        oracle: WEB2_ORACLE,
+        relayer: web2json.keeper?.address ?? null,
+        feeds: await Promise.all(web2json.FEEDS.map(feedState)),
+      });
+    } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/web2/feeds/:feedId", async (req, res) => {
+    if (!WEB2_ORACLE) {
+      return res.status(503).json({ error: "MOLFI_WEB2_ORACLE not configured" });
+    }
+    const feed = web2json.feedById(req.params.feedId);
+    if (!feed) return res.status(404).json({ error: "unknown feed" });
+    try {
+      res.json(await feedState(feed));
+    } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
+  });
+
+  /**
+   * Run the full attestation pipeline for one feed and record what landed.
+   *
+   * Slow by nature — an FDC round has to close before a proof exists — so this
+   * is a deliberate, explicitly-triggered action rather than something a page
+   * load kicks off.
+   */
+  app.post("/api/web2/attest", async (req, res) => {
+    if (!WEB2_ORACLE) {
+      return res.status(503).json({ error: "MOLFI_WEB2_ORACLE not configured" });
+    }
+    if (!web2json.keeper) {
+      return res.status(503).json({ error: "MOLFI_KEEPER_KEY not configured — cannot broadcast" });
+    }
+    const feed = web2json.feedById(req.body?.feedId ?? web2json.FEEDS[0]?.feedId);
+    if (!feed) return res.status(404).json({ error: "unknown feed" });
+    try {
+      const record = await app.locals.attestFeed(feed);
+      res.json(record);
+    } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/web2/attestations", async (req, res) => {
+    const q = req.query.feedId ? { feedId: String(req.query.feedId) } : {};
+    res.json(
+      await Web2Attestations.find(q).sort({ attestedAt: -1 }).limit(50).toArray(),
+    );
+  });
+
+  /**
+   * Attest one feed and persist the result. Shared by the route and the keeper
+   * loop in server.js so both write the same history.
+   */
+  app.locals.attestFeed = async function attestFeed(feed) {
+    const out = await web2json.attest(WEB2_ORACLE, feed);
+    const record = { _id: `${out.feedId}:${out.votingRound}`, oracle: WEB2_ORACLE, ...out };
+    await Web2Attestations.updateOne(
+      { _id: record._id },
+      { $set: record },
+      { upsert: true },
+    );
+    return record;
+  };
+  app.locals.web2Oracle = WEB2_ORACLE;
 
   /** The selectable stake sizes, so the UI never hardcodes them. */
   app.get("/api/confidential/tiers", (_req, res) => {

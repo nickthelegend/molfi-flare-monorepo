@@ -19,6 +19,7 @@ import "dotenv/config";
 import { createApp } from "./app.js";
 import * as chain from "./chain.js";
 import * as zk from "./zk.js";
+import * as web2json from "./web2json.js";
 
 const PORT = Number(process.env.PORT) || 4000;
 
@@ -162,16 +163,60 @@ async function main() {
   await OnchainTrades.createIndex({ market: 1 });
   await OnchainTrades.createIndex({ ts: -1 });
 
+  async function writeTrades(rows) {
+    if (!rows.length) return;
+    await OnchainTrades.bulkWrite(
+      rows.map((r) => ({
+        updateOne: { filter: { _id: r._id }, update: { $set: r }, upsert: true },
+      })),
+      { ordered: false },
+    );
+  }
+
+  /**
+   * One-time full backfill through the explorer.
+   *
+   * The RPC path below can keep up but cannot catch up: 30 blocks per
+   * `eth_getLogs`, 40 calls a tick, against a chain 33 million blocks deep.
+   * Measured 2026-08-10, starting from genesis it reached block 1,200 in a tick
+   * — about five days of ticking to find a bet placed minutes earlier. That is
+   * why the cold-start cursor used to jump to head-6000 and simply abandon
+   * everything older, leaving the leaderboard silently incomplete.
+   *
+   * Ported from _references/flare-prediction-market. Runs once; the cursor then
+   * hands over to the RPC tail.
+   */
+  async function backfillEscrowLogs() {
+    const done = await Cursors.findOne({ _id: "escrowBackfill" });
+    if (done?.completedAt) return;
+    const { rows, pages, truncated } = await chain.readEscrowLogsViaExplorer(0);
+    await writeTrades(rows);
+    if (truncated) {
+      // Do NOT mark it complete — a capped walk that claims to be done is how
+      // an incomplete leaderboard becomes permanent.
+      console.warn(
+        `[molfi-backend] escrow backfill hit the page cap after ${pages} page(s); will retry`,
+      );
+      return;
+    }
+    await Cursors.updateOne(
+      { _id: "escrowBackfill" },
+      { $set: { completedAt: Date.now(), rows: rows.length, pages } },
+      { upsert: true },
+    );
+    console.log(`[molfi-backend] escrow backfill: ${rows.length} event(s) over ${pages} page(s)`);
+  }
+
   async function indexEscrowLogs() {
+    await backfillEscrowLogs();
+
     const cur = await Cursors.findOne({ _id: "escrowLogs" });
-    // No cursor yet: start near the deploy rather than at genesis — Coston2 is
-    // millions of blocks deep and the escrow was deployed today.
+    // With the explorer backfill covering history, the RPC walk only has to
+    // handle the live tail, so a short cold-start window is now correct rather
+    // than a concession.
     const envFrom = Number(process.env.ESCROW_FROM_BLOCK) || 0;
     let start = cur?.nextBlock ?? envFrom;
     if (!start) {
-      // ~3h of history at Coston2's ~1.8s blocks. The RPC caps getLogs at 30
-      // blocks per call, so a deep backfill is expensive; set ESCROW_FROM_BLOCK
-      // to reach further back.
       start = Number(await chain.publicClient.getBlockNumber()) - 6_000;
     }
     const { rows, nextBlock, caughtUp } = await chain.readEscrowLogs(Math.max(0, start));
@@ -193,6 +238,43 @@ async function main() {
 
   const app = createApp({ db, chain, zk, lastPrice });
 
+  // ── Web2Json feed keeper ──────────────────────────────────────────────────
+  // A feed only means something if it is refreshed: `getFreshPrice` reverts once
+  // an observation ages past a market's staleness bound, which is correct but
+  // useless if nobody ever posts a newer one. This is the poster.
+  //
+  // Anyone can do this — the oracle takes a proof from any address — so a
+  // second relayer is redundancy, not a conflict. Whoever's proof lands first
+  // wins the round and the other simply reverts with StaleObservation.
+  async function refreshWeb2Feeds() {
+    if (!app.locals.web2Oracle || !web2json.keeper) return;
+    const bindings = await web2json.verifyFeedBindings(app.locals.web2Oracle);
+    for (const b of bindings) {
+      if (b.agrees) continue;
+      // The relayer and the contract disagree about what this feed asks. Every
+      // proof it produces would be rejected; say so once rather than burning
+      // gas on a loop that cannot succeed.
+      console.warn(
+        `[molfi-backend] web2 feed ${b.feedId} binding mismatch: ` +
+          `relayer ${b.local} vs contract ${b.onChain} — not attesting`,
+      );
+    }
+    for (const feed of web2json.FEEDS) {
+      if (!bindings.find((b) => b.feedId === feed.feedId)?.agrees) continue;
+      const state = await web2json.readFeed(app.locals.web2Oracle, feed.feedId);
+      if (!state.registered) continue;
+      const age = state.observation
+        ? Math.floor(Date.now() / 1000) - state.observation.observedAt
+        : Infinity;
+      if (age < WEB2_REFRESH_SECONDS) continue;
+      const rec = await app.locals.attestFeed(feed);
+      console.log(
+        `[molfi-backend] web2 ${feed.feedId} → ${rec.rawValue} (round ${rec.votingRound}) ${rec.submitTx}`,
+      );
+    }
+  }
+  const WEB2_REFRESH_SECONDS = Number(process.env.MOLFI_WEB2_REFRESH_SECONDS || 1800);
+
   await pollPrices();
   await ensureMarkets();
   await indexEscrowLogs().catch((e) =>
@@ -207,6 +289,14 @@ async function main() {
     15_000,
   );
   setInterval(() => app.locals.reconcileVault().catch(() => {}), 20_000);
+  // Checked every 5 min, but only ATTESTS when the observation is older than
+  // MOLFI_WEB2_REFRESH_SECONDS — each attestation is an on-chain fee plus a
+  // full FDC round, so polling cheaply and acting rarely is the point.
+  refreshWeb2Feeds().catch((e) => console.warn(`[molfi-backend] web2 keeper: ${e.message}`));
+  setInterval(
+    () => refreshWeb2Feeds().catch((e) => console.warn(`[molfi-backend] web2 keeper: ${e.message}`)),
+    300_000,
+  );
 
   app.listen(PORT, () => console.log(`[molfi-backend] API on http://localhost:${PORT}`));
 }
