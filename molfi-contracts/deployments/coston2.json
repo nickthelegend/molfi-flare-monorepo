@@ -14,7 +14,7 @@
     "molfiMarket": "0xD709773A1128c1160b292F505FAA8E3e8d0786fF",
     "predictEscrow": "0xbe2EEc9aEb6fb923c0dDA1B11bD0BC22fA103067",
     "confidentialBet": "0x1e5e41cbC1e6FB96635DBc3191A03d8CC970ba99",
-    "sealedBidBook": "0x22B0F197b12e86653d449326b7677e65e2162c90",
+    "sealedBidBook": "0x10B3199147B5B08b15224d1b6149b5e32697396C",
     "web2JsonOraclePrevious": "0x3f067bab1b8688A66f0E1F2A23785c308Da6dF11",
     "web2JsonOracle": "0xD1f281023Eb50a11Df96b496FE35aFB98b9deC28"
   },
@@ -41,5 +41,6 @@
     "teeMachineStatus": "PRODUCTION",
     "simulatedTee": true,
     "registeredAt": "2026-08-07T05:38:55Z"
-  }
+  },
+  "teeMachine": "0xD114B9B601B77D5Fa1EBdc82bdcafCdB7129f205"
 }

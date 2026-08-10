@@ -149,6 +149,79 @@ error: market is still open — closes in 2013s. The book cannot be opened befor
 with `data: "0x"`. `fcc-e2e-local.ts` fails the whole run if it ever answers
 again.
 
+## Two ways to authorise an opening, and why the second is better
+
+`SealedBidBook` now accepts an opening from either of two identities.
+
+| | trusts | key lives |
+|---|---|---|
+| `openMarket` | `teeSigner` | handed to the extension via `config/extension.env` |
+| `openMarketFromTee` | `teeMachine` | generated inside tee-node; only a public key and a loopback `/sign` are reachable |
+
+The first was the honest soft spot of the whole design: every integrity check on
+it is real, but the identity signing is one **we** configured. The second is
+Flare's own scheme — when an extension returns an `ActionResult`, tee-node's
+router signs it with the node's attested identity key, which the extension
+cannot read or substitute.
+
+```
+resultHash = keccak256( keccak256(data) ‖ actionId ‖ keccak256(tag) ‖ status )   -- packed
+payload    = keccak256( abi.encode(bytes32("TEE_ACTION_RESULT"), chainId, resultHash) )  -- NOT packed
+signature  = EIP-191 personal-sign over payload
+```
+
+Note the deliberate mix of `encodePacked` and `encode`. Get either wrong and you
+produce a perfectly valid signature over the wrong bytes, which surfaces as an
+unrecognised signer — pointing you at the key rather than the encoding.
+
+**A stronger signer buys no extra latitude.** Both paths converge on the same
+reconciliation: bid count and total escrow are facts the chain already witnessed,
+and an opening that disagrees with either does not execute. Authorisation decides
+*who may publish*; it never decides what the numbers are.
+`SealedBidBook.teePath.test.ts` asserts the conservation and count checks still
+fire on the TEE path specifically, because "the machine signed it" is exactly the
+argument that would tempt someone to skip them.
+
+### Two things the docs do not tell you, established by experiment
+
+- **The node's address** is `keccak256(x‖y)` of `teeInfo.publicKey` from the
+  proxy's `/info`, last 20 bytes. It is NOT `machineData.initialOwner` — that is
+  the deployer, and on this stack it really is a different address.
+- **`/sign` signs `EIP-191(keccak256(message))`**, not the message and not the
+  bare hash. Found by signing three messages and checking which of four
+  candidate preimages gave a *stable* recovered address across all of them; the
+  other three each produced a different address per message. So passing
+  `abi.encode(PREFIX, chainId, resultHash)` as `message` lands on exactly the
+  digest the contract recomputes.
+
+### Proven on Coston2
+
+`node scripts/live-tee-open.mjs` — this script holds no signing key at all:
+
+```
+book        0x10B3199147B5B08b15224d1b6149b5e32697396C
+tee node    0x33ed6fba3FC0b8A9bD656AfAaa8dd1915DEDB201  (derived from /info publicKey)
+sealed 1 FXRP across 1 bid(s) — side not on chain
+resolved from FTSOv2 → YES
+ENCLAVE OPENED: YES 1 FXRP · NO 0 FXRP
+signed by the TEE node itself — no key in this process ✅
+openMarketFromTee accepted · 0x8b70ec744717f7ddbe0783afead2930d5ac7f6d6753654101e7c3d2333562c06
+winner claimed 1 FXRP · 0x01e79bd33a663af2dbda677670b4400627ac8d656135caefa03e58ab9fb44686
+```
+
+Note the node address is **not** the registered machine `0xD114B9B6…`: the node
+key is regenerated on every container start with no persistence, so a restart
+invalidates it. `setTeeMachine` exists for that, and the script rotates before
+opening rather than failing mysteriously.
+
+**What is still not wired.** Reaching this path through Flare's *on-chain*
+instruction pipeline — `InstructionSender` → registry → data providers → proxy →
+tee-node — needs MOLFI send functions on the InstructionSender and a
+re-registration of the extension. That is not done. The signature above is
+obtained from the same tee-node that pipeline would use, through its own signing
+API, so the scheme and the identity are real; the on-chain *routing* to it is not
+yet.
+
 ## The signer-drift trap
 
 The enclave's signing key is generated inside the extension. Rebuild the image,

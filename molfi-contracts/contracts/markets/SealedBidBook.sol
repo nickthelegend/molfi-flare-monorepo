@@ -5,6 +5,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+import {TeeActionResult} from "../tee/TeeActionResult.sol";
+
 interface IMarketRef {
     function isResolved(bytes32 id) external view returns (bool);
 
@@ -78,6 +80,8 @@ contract SealedBidBook is ReentrancyGuard {
     /// @notice The attested enclave key allowed to open a market. Rotatable,
     ///         because a TEE redeploy mints a fresh key.
     address public teeSigner;
+    /// @notice Flare's registered TEE machine — see `openMarketFromTee`.
+    address public teeMachine;
     address public admin;
 
     /// @notice Where the 2% fee goes, matching PredictEscrow.
@@ -129,6 +133,7 @@ contract SealedBidBook is ReentrancyGuard {
         address indexed bidder,
         uint256 payout
     );
+    event TeeMachineChanged(address indexed from, address indexed to);
     event TeeSignerChanged(address indexed from, address indexed to);
 
     error NotAdmin();
@@ -147,6 +152,12 @@ contract SealedBidBook is ReentrancyGuard {
     error AlreadyClaimed();
     error NotAWinner();
     error BadIndex();
+    /// @dev The TEE-node path is not configured on this deployment.
+    error TeeMachineNotSet();
+    /// @dev The extension reported its own failure; its payload is not a result.
+    error TeeReportedFailure(uint8 status);
+    /// @dev A signed result addressed to a different book deployment.
+    error WrongBook(address book);
 
     modifier onlyAdmin() {
         if (msg.sender != admin) revert NotAdmin();
@@ -261,9 +272,90 @@ contract SealedBidBook is ReentrancyGuard {
         );
         if (signer != teeSigner) revert BadSignature();
 
-        // …and the numbers reconcile with what the chain already witnessed.
-        // This is what makes a dishonest opening impossible rather than merely
-        // discouraged: the enclave never got to choose either of these.
+        _settleOpening(marketId, b, yesPool, noPool, bidCount, openingsRoot);
+    }
+
+    /**
+     * @notice Publish an opening authorised by Flare's TEE node itself.
+     *
+     * @dev The second of two authorisation paths, and the stronger one.
+     *
+     *      `openMarket` above trusts `teeSigner` — an address an admin sets, and
+     *      whose key the extension is handed through its environment. Every
+     *      integrity check on it is real, but the identity is one we configured.
+     *
+     *      This path trusts `teeMachine`: the address Flare's registry attested
+     *      and registered. When an extension returns an `ActionResult`,
+     *      tee-node's router signs it with the node's own identity key — the
+     *      extension never sees that key and cannot substitute one. So an
+     *      opening accepted here was authorised by the registered machine, not
+     *      by anything an operator supplied.
+     *
+     *      Both paths converge on the same reconciliation. Authorisation says
+     *      WHO may publish an opening; it never says what the numbers are.
+     *
+     *      `resultData` is the extension's response payload, ABI-encoded as
+     *      (book, marketId, yesPool, noPool, bidCount, openingsRoot). The book
+     *      address is inside the signed bytes so a result meant for one
+     *      deployment cannot be replayed into another.
+     */
+    function openMarketFromTee(
+        bytes calldata resultData,
+        bytes32 actionId,
+        string calldata submissionTag,
+        uint8 status,
+        bytes calldata signature
+    ) external nonReentrant {
+        if (teeMachine == address(0)) revert TeeMachineNotSet();
+        // status 0 is the extension reporting its own failure. Publishing the
+        // payload of a failed action would settle a market on whatever happened
+        // to be in the error path.
+        if (status != 1) revert TeeReportedFailure(status);
+
+        address signer = TeeActionResult.recoverSigner(
+            resultData,
+            actionId,
+            submissionTag,
+            status,
+            signature
+        );
+        if (signer != teeMachine) revert BadSignature();
+
+        (
+            address book,
+            bytes32 marketId,
+            uint256 yesPool,
+            uint256 noPool,
+            uint32 bidCount,
+            bytes32 openingsRoot
+        ) = abi.decode(resultData, (address, bytes32, uint256, uint256, uint32, bytes32));
+        if (book != address(this)) revert WrongBook(book);
+
+        Book storage b = books[marketId];
+        if (b.opened) revert AlreadyOpened();
+        (, uint64 closeTs, , ) = market.getMarket(marketId);
+        if (block.timestamp < closeTs) revert NotClosedYet();
+
+        _settleOpening(marketId, b, yesPool, noPool, bidCount, openingsRoot);
+    }
+
+    /**
+     * @dev The part neither signer gets a say in.
+     *
+     * The chain already witnessed how many bids it took and exactly how much
+     * FXRP it escrowed. An opening that disagrees with either does not execute.
+     * That is what makes a dishonest enclave — under either authorisation path —
+     * unable to move a bettor's stake to the other side, rather than merely
+     * discouraged from trying.
+     */
+    function _settleOpening(
+        bytes32 marketId,
+        Book storage b,
+        uint256 yesPool,
+        uint256 noPool,
+        uint32 bidCount,
+        bytes32 openingsRoot
+    ) private {
         if (bidCount != b.bidCount) revert CountMismatch(bidCount, b.bidCount);
         uint256 reported = yesPool + noPool;
         if (reported != b.totalEscrowed) {
@@ -276,6 +368,15 @@ contract SealedBidBook is ReentrancyGuard {
         b.openingsRoot = openingsRoot;
 
         emit MarketOpened(marketId, yesPool, noPool, bidCount, openingsRoot);
+    }
+
+    /// @notice The registered FCC machine whose node signs ActionResults.
+    /// @dev Rotatable for the same reason `teeSigner` is: re-registering the
+    ///      extension mints a new machine identity, and a book pinned to a dead
+    ///      one could never be opened through this path again.
+    function setTeeMachine(address next) external onlyAdmin {
+        emit TeeMachineChanged(teeMachine, next);
+        teeMachine = next;
     }
 
     // ── claim ────────────────────────────────────────────────────────────────

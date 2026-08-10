@@ -39,8 +39,24 @@ async function main() {
   console.log(`     market    ${d.contracts.molfiMarket}`);
   console.log(`     teeSigner ${teeSigner}`);
 
+  // The second authorisation path: Flare's registered TEE machine, whose node
+  // signs ActionResults with its own attested key. Wired at deploy so the
+  // stronger path is available from block one rather than bolted on later.
+  const teeMachine = process.env.TEE_MACHINE || d.fcc?.teeMachineId;
+  if (teeMachine) {
+    const tx = await book.setTeeMachine(teeMachine);
+    const rc = await tx.wait();
+    if (rc?.status !== 1) throw new Error(`setTeeMachine reverted: ${tx.hash}`);
+    console.log(`     teeMachine ${teeMachine}  (openMarketFromTee)`);
+  } else {
+    console.log(
+      `     ⚠ no TEE machine configured — openMarketFromTee will revert TeeMachineNotSet`,
+    );
+  }
+
   d.contracts.sealedBidBook = addr;
   d.teeSigner = teeSigner;
+  d.teeMachine = teeMachine ?? null;
   writeFileSync(DEPLOYMENTS, `${JSON.stringify(d, null, 2)}\n`);
   console.log(`\n  wrote deployments/coston2.json`);
 }
