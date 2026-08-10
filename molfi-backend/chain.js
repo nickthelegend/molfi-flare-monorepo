@@ -103,7 +103,13 @@ export const coston2Chain = defineChain({
  */
 export const publicClient = createPublicClient({
   chain: coston2Chain,
-  transport: http(COSTON2.rpcUrl),
+  // Coston2's public RPC rate-limits, and answers 429 with an HTML error page.
+  // viem's default of three near-instant retries burns through in about a
+  // second, and the failure then surfaced as "market not found" on a market
+  // that plainly exists. Backing off further and for longer costs nothing when
+  // the node is healthy and is the difference between a slow page and a wrong
+  // one.
+  transport: http(COSTON2.rpcUrl, { retryCount: 6, retryDelay: 1200, timeout: 30_000 }),
   batch: { multicall: { batchSize: 4096, wait: 24 } },
 });
 
@@ -450,11 +456,19 @@ export async function getMarket(idHex) {
 }
 
 /** Full market record including its FTSO feed and strike. */
+/**
+ * Read a market, or throw if the chain could not be reached.
+ *
+ * This used to `catch { return null }`, and every caller reads `null` as "no
+ * such market". Coston2's public RPC rate-limits, so under load a market that
+ * exists — one the user is looking at — was reported as 404 "not found". A
+ * missing market and an unreachable node are different answers and the caller
+ * has to be able to tell them apart: absence is `null`, failure throws.
+ */
 export async function getMarketFull(idHex) {
-  try {
-    const m = await readContract(CONTRACTS.market, MARKET_ABI, "marketOf", [asHex(idHex)]);
-    if (!m || !m[8]) return null; // exists
-    return {
+  const m = await readContract(CONTRACTS.market, MARKET_ABI, "marketOf", [asHex(idHex)]);
+  if (!m || !m[8]) return null; // the contract says it does not exist
+  return {
       question: m[0],
       closeTs: Number(m[1]),
       feedId: m[2],
@@ -463,12 +477,9 @@ export async function getMarketFull(idHex) {
       maxStaleness: Number(m[5]),
       status: Number(m[6]),
       outcome: Number(m[7]),
-      exists: Boolean(m[8]),
-      hasOracle: Boolean(m[9]),
-    };
-  } catch {
-    return null;
-  }
+    exists: Boolean(m[8]),
+    hasOracle: Boolean(m[9]),
+  };
 }
 
 /**

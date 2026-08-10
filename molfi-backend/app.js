@@ -475,7 +475,17 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
       // Not indexed — read MolfiMarket directly, with the same enrichment the
       // list endpoint does. Returning null strike/spot here left the trade
       // terminal showing "…" and "–" for a market whose price is on-chain.
-      const mk = await chain.getMarketFull(req.params.id);
+      // `getMarketFull` throws when the chain is unreachable and returns null
+      // only when the contract says the market does not exist — so a rate-limited
+      // RPC produces "can't reach Coston2", never a 404 on a live market.
+      let mk;
+      try {
+        mk = await chain.getMarketFull(req.params.id);
+      } catch (e) {
+        return res.status(503).json({
+          error: `could not reach Coston2 to read this market: ${e.message.split("\n")[0]}`,
+        });
+      }
       if (!mk) return res.status(404).json({ error: "not found" });
       const resolved = mk.status === 2;
 

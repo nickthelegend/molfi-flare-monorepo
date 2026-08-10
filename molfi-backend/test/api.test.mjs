@@ -453,3 +453,35 @@ test("GET /api/onchain/markets splits open vs settled and strands neither", asyn
   // OI keeps FXRP precision — r2 rounded a 0.0011 FXRP pot to 0.
   assert.equal(openTab.body[0].oi, 0.0011);
 });
+
+test("onchain market detail: a missing market 404s, an unreachable chain 503s", async () => {
+  // These are different answers and the endpoint has to tell them apart.
+  // `getMarketFull` used to swallow every error and return null, so a
+  // rate-limited RPC told the user a market they were looking at did not
+  // exist — reproduced against the live node during a 429 window.
+  const absent = await bootApp({
+    chain: mockChain({ async getMarketFull() { return null; } }),
+  });
+  try {
+    const { status, body } = await absent.get(`/api/onchain/markets/0x${"ab".repeat(32)}`);
+    assert.equal(status, 404);
+    assert.equal(body.error, "not found");
+  } finally {
+    await absent.close();
+  }
+
+  const unreachable = await bootApp({
+    chain: mockChain({
+      async getMarketFull() {
+        throw new Error("HTTP request failed. Status: 429");
+      },
+    }),
+  });
+  try {
+    const { status, body } = await unreachable.get(`/api/onchain/markets/0x${"ab".repeat(32)}`);
+    assert.equal(status, 503);
+    assert.match(body.error, /could not reach Coston2/);
+  } finally {
+    await unreachable.close();
+  }
+});
