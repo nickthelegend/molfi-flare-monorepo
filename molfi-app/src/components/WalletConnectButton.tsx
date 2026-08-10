@@ -1,6 +1,5 @@
 import { type ReactNode, useState } from "react";
 import { ChevronDown, Copy, Loader2, LogOut, Wallet as WalletIcon } from "lucide-react";
-import type { WalletWithRequiredFeatures } from "@mysten/wallet-standard";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,11 +11,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useWallet } from "@/context/WalletContext";
-import {
-  formatSuiAddress,
-  getGoogleEnokiWallet,
-  isGoogleEnokiWallet,
-} from "@/lib/sui/wallets";
 import { isEnokiGoogleLoginEnabled } from "@/lib/config";
 import { showError, showTxSuccess } from "@/lib/toast";
 
@@ -65,8 +59,9 @@ export function WalletConnectButton({
   const [chooserOpen, setChooserOpen] = useState(false);
   const loginEnabled = isEnokiGoogleLoginEnabled();
 
-  const externalWallets = wallets.filter((w) => !isGoogleEnokiWallet(w));
-  const connectedIsGoogle = wallet ? isGoogleEnokiWallet(wallet) : false;
+  // RainbowKit owns wallet discovery on Flare; the Sui/Enoki chooser is gone.
+  const externalWallets = wallets;
+  const connectedIsGoogle = false;
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
@@ -82,7 +77,7 @@ export function WalletConnectButton({
     onMenuClose?.();
     setChooserOpen(false);
     refreshWallets();
-    const googleWallet = getGoogleEnokiWallet();
+    const googleWallet = null;
     if (!googleWallet) {
       showError(
         loginEnabled
@@ -91,13 +86,13 @@ export function WalletConnectButton({
       );
       return;
     }
-    await connect(googleWallet);
+    await connect();
   };
 
-  const handleConnectWallet = async (target: WalletWithRequiredFeatures) => {
+  const handleConnectWallet = async () => {
     onMenuClose?.();
     setChooserOpen(false);
-    await connect(target);
+    await connect();
   };
 
   type WalletOption = {
@@ -116,15 +111,13 @@ export function WalletConnectButton({
       }
     : null;
 
-  const walletOptions: WalletOption[] = externalWallets.map((w) => ({
-    id: w.name,
-    label: w.name,
-    icon: w.icon ? (
-      <img src={w.icon} alt="" className="h-4 w-4 shrink-0 rounded-full" />
-    ) : (
-      <WalletIcon className="h-4 w-4 shrink-0 opacity-90" />
-    ),
-    onSelect: () => handleConnectWallet(w),
+  // Empty by construction: RainbowKit renders its own chooser, so this list
+  // (the old Sui Wallet-Standard one) has nothing to enumerate.
+  const walletOptions: WalletOption[] = externalWallets.map(() => ({
+    id: "wallet",
+    label: "Wallet",
+    icon: <WalletIcon className="h-4 w-4 shrink-0 opacity-90" />,
+    onSelect: () => handleConnectWallet(),
   }));
 
   const hasGoogle = googleOption !== null;
@@ -148,7 +141,7 @@ export function WalletConnectButton({
             <span className="flex min-w-0 items-center gap-2">
               <WalletIcon className="h-4 w-4 shrink-0 opacity-80" />
               <span className={cn("truncate", compact && "max-w-[4.25rem] sm:max-w-none")}>
-                {formatSuiAddress(address)}
+                {`${address.slice(0, 6)}…${address.slice(-4)}`}
               </span>
             </span>
             <ChevronDown

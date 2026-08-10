@@ -1,4 +1,6 @@
-import type { gsap as GsapType } from "gsap";
+// GSAP ships its types as a GLOBAL namespace plus `GSAP*` aliases; it does not
+// export `gsap` as a TS namespace, so `import type { gsap as GsapType }` gave
+// "Cannot find namespace 'GsapType'" on every use. Use the globals.
 import { ensureGsapPlugins, gsap } from "@/lib/animation/gsap-config";
 import { prefersReducedMotion } from "@/lib/animation/counter";
 
@@ -16,10 +18,10 @@ export const fadeInPreset = {
 } as const;
 
 export function revealFromHidden(
-  targets: GsapType.TweenTarget,
+  targets: GSAPTweenTarget,
   preset: typeof fadeUpPreset | typeof fadeInPreset = fadeUpPreset,
-  overrides: GsapType.TweenVars = {},
-): GsapType.core.Tween | null {
+  overrides: GSAPTweenVars = {},
+): GSAPTween | null {
   ensureGsapPlugins();
 
   if (prefersReducedMotion()) {
@@ -44,9 +46,9 @@ export function revealFromHidden(
 }
 
 export function staggerReveal(
-  targets: GsapType.TweenTarget,
-  overrides: GsapType.TweenVars = {},
-): GsapType.core.Tween | null {
+  targets: GSAPTweenTarget,
+  overrides: GSAPTweenVars = {},
+): GSAPTween | null {
   return revealFromHidden(targets, fadeUpPreset, {
     stagger: 0.07,
     ...overrides,

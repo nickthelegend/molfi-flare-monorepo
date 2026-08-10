@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { EyeOff, Loader2, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { sealedBookStatus, sealBid } from "@/lib/stellar/soroban";
+import { sealedBookStatus, sealBid, fxrpBalance } from "@/lib/stellar/soroban";
 import { CONTRACTS, FXRP_UNIT, OUTCOME, contractUrl } from "@/lib/stellar/contracts";
 import { fetchSealedKey } from "@/lib/molfi-backend";
 import { sealSide } from "@/lib/sealed/seal";
-import { showError, showTxSuccess } from "@/lib/toast";
+import { showError, showTxSuccess, showTxError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,7 +30,8 @@ export function SealedBidPanel({
   closed: boolean;
   onConnect: () => void;
 }) {
-  const [amount, setAmount] = useState("5");
+  // Sized against the faucet's 10 FXRP.
+  const [amount, setAmount] = useState("1");
   const [side, setSide] = useState<number>(OUTCOME.YES);
   const [busy, setBusy] = useState(false);
 
@@ -55,13 +56,58 @@ export function SealedBidPanel({
   const yesPool = Number(book.data?.yesPool ?? 0n) / FXRP_UNIT;
   const noPool = Number(book.data?.noPool ?? 0n) / FXRP_UNIT;
 
+  /**
+   * Spendable FXRP — same key and raw-atom return as the header faucet pill, so
+   * React Query's dedupe cannot hand the two components different units.
+   *
+   * The sealed form had the same gap as the bet ticket and the vault deposit:
+   * only `amt > 0` was checked, so an amount over the balance reached the
+   * contract and came back as a raw revert.
+   */
+  const balanceQuery = useQuery({
+    queryKey: ["fxrp-balance", address],
+    queryFn: () => fxrpBalance(address as string),
+    enabled: Boolean(address),
+    refetchInterval: 20_000,
+  });
+  const balance = balanceQuery.data == null ? null : Number(balanceQuery.data) / FXRP_UNIT;
+
+  /** Why this sealed bid cannot be submitted, in the user's terms — or null. */
+  const bidError = (() => {
+    // Without the enclave's public key there is nothing to encrypt to. The
+    // button used to stay enabled here (`key.isLoading` is false once the
+    // query has FAILED), so the only feedback was an error toast after a
+    // click that could never have worked.
+    if (!key.isLoading && !key.data?.publicKey) {
+      return "The enclave is unreachable, so a bid cannot be sealed right now. Standard and private bets still work.";
+    }
+    const amt = Number(amount);
+    if (!amount.trim()) return "Enter an amount.";
+    if (!Number.isFinite(amt) || amt <= 0) return "Enter an amount greater than zero.";
+    if (amt < 1 / FXRP_UNIT) return "The smallest bid is 0.000001 FXRP.";
+    if ((amount.split(".")[1]?.length ?? 0) > 6) {
+      return "FXRP has 6 decimal places — trim the extra digits.";
+    }
+    if (balance != null && amt > balance) {
+      return balance === 0
+        ? "You have no FXRP yet — get some from the faucet in the header."
+        : `You have ${balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} FXRP.`;
+    }
+    return null;
+  })();
+
+  const inFlight = useRef(false);
+
   const place = async () => {
     if (!address) return void onConnect();
     if (!key.data?.publicKey) {
       return showError("The enclave is unreachable — a sealed bid cannot be encrypted right now.");
     }
+    if (bidError) return showError(bidError);
+    // Synchronous latch: `busy` is state, so a double-click sends twice.
+    if (inFlight.current) return;
+    inFlight.current = true;
     const amt = Number(amount);
-    if (!(amt > 0)) return showError("Enter an amount greater than 0.");
     setBusy(true);
     try {
       // Encrypted HERE, in the page. The side never leaves this function in
@@ -76,8 +122,9 @@ export function SealedBidPanel({
       showTxSuccess(`🔒 Sealed ${amt} FXRP — your side is encrypted to the enclave`, hash);
       await book.refetch();
     } catch (e) {
-      showError(e instanceof Error ? e.message : "Sealed bid failed");
+      showTxError(e);
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -155,7 +202,13 @@ export function SealedBidPanel({
             />
           </div>
 
-          <Button onClick={place} disabled={busy || key.isLoading} className="w-full gap-1.5" size="lg">
+          {bidError ? <p className="text-[11px] text-destructive">{bidError}</p> : null}
+          <Button
+            onClick={place}
+            disabled={busy || key.isLoading || Boolean(address && bidError)}
+            className="w-full gap-1.5"
+            size="lg"
+          >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
             {busy ? "Sealing…" : "Seal bid"}
           </Button>

@@ -44,16 +44,32 @@ export function GsapMotionProvider({ children }: Props) {
     };
   }, []);
 
+  /**
+   * Last navigation type, tracked from the history subscriber.
+   *
+   * `router.history.action` does not exist on TanStack's `RouterHistory` — the
+   * action is delivered to `subscribe`'s callback, not stored on the object, so
+   * reading it was always `undefined` and the POP check below never fired: a
+   * browser Back jumped you to the top of the restored page instead of leaving
+   * the scroll position alone.
+   */
+  const lastAction = useRef<string | null>(null);
+  useEffect(
+    () => router.history.subscribe(({ action }) => {
+      lastAction.current = action.type;
+    }),
+    [router.history],
+  );
+
   useEffect(() => {
     if (pathname === prevPath.current) return;
-
-    const action = router.history.action;
     prevPath.current = pathname;
 
-    if (action === "POP") return;
+    // Back/forward restores a scroll position; don't yank it to the top.
+    if (lastAction.current === "POP" || lastAction.current === "GO") return;
 
     animateScrollTo(0, { duration: 0.55, ease: "power2.out" });
-  }, [pathname, router.history.action]);
+  }, [pathname]);
 
   useEffect(() => {
     if (prefersReducedMotion()) return;

@@ -82,6 +82,9 @@ export async function fetchDeepbookOhlcv(
   endTimeMs: number,
   options?: { limit?: number },
 ): Promise<OhlcvCandle[]> {
+  // No indexer configured: return nothing rather than building a request
+  // against an empty base (which would resolve against the app's own origin).
+  if (!appConfig.deepbookIndexerUrl) return [];
   const base = appConfig.deepbookIndexerUrl.replace(/\/$/, "");
   const params = new URLSearchParams({
     interval,

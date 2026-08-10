@@ -15,6 +15,7 @@
 import express from "express";
 import { randomBytes, createHash } from "node:crypto";
 import * as web2json from "./web2json.js";
+import * as defaultKeeper from "./market-keeper.js";
 
 const FEE_RATE = 0.02; // 2% trading fee → LP vault
 export const VAULT_ID = "molfi-lp";
@@ -72,7 +73,12 @@ function serializeComment(d) {
  * @param {object} deps.zk     zk.js module (or a mock)
  * @param {Record<string, number>} [deps.lastPrice]  shared live-spot cache
  */
-export function createApp({ db, chain, zk, lastPrice = {} }) {
+/**
+ * @param keeper the signing side of the backend. Injected like `chain`/`zk` so a
+ *   test can supply a stub; defaults to the real keeper module. Only the
+ *   confidential claim path uses it — see `ensureConfidentialRoot`.
+ */
+export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {} }) {
   const Prices = db.collection("prices");
   const Markets = db.collection("markets");
   const Positions = db.collection("positions");
@@ -304,9 +310,39 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
     };
   }
 
+  /**
+   * Last good on-chain market list per tab, so a throttled RPC does not empty
+   * the venue.
+   *
+   * Coston2's public RPC 429s under burst. When `listMarketIds` failed this
+   * endpoint returned `[]`, which the grid renders identically to "no markets
+   * exist" — an app that looks dead for the duration of someone else's rate
+   * limit. Serving the last known list (flagged stale) is honest and correct;
+   * inventing markets would not be.
+   */
+  const marketCache = { open: null, closed: null };
+  const MARKET_CACHE_TTL_MS = 30_000;
+
+  /**
+   * Real bet counts per market, from the indexed escrow `Bet` events.
+   *
+   * Both on-chain market endpoints used to emit a literal `bets: 0`, so every
+   * card said "No bets yet" no matter how much FXRP was actually staked — the
+   * card contradicted its own pot the moment anyone traded.
+   */
+  async function betCounts(marketIds) {
+    if (!marketIds.length) return new Map();
+    const rows = await OnchainTrades.aggregate([
+      { $match: { market: { $in: marketIds }, kind: "bet" } },
+      { $group: { _id: "$market", n: { $sum: 1 } } },
+    ]).toArray();
+    return new Map(rows.map((r) => [r._id, r.n]));
+  }
+
   app.get("/api/onchain/markets", async (req, res) => {
     try {
       const closed = req.query.status === "closed";
+      const cacheKey = closed ? "closed" : "open";
       const filter = closed ? { resolved: true } : { resolved: false, closeTs: { $gt: Date.now() } };
       const live = await OnchainMarkets.find(filter)
         .sort(closed ? { resolvedAt: -1 } : { closeTs: 1 })
@@ -326,8 +362,32 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       // Every market is read in PARALLEL, and the client batches those reads
       // through Multicall3 (see chain.js), so this is one RPC round trip rather
       // than ~4 per market.
+      // Cache guards the CHAIN read only — never the Mongo index above, which
+      // is local, cheap, and authoritative the moment a market is indexed.
+      // (Checking it earlier hid a freshly indexed market for a full TTL.)
+      const cached = marketCache[cacheKey];
+      if (cached && Date.now() - cached.at < MARKET_CACHE_TTL_MS) {
+        return res.json(cached.rows);
+      }
+
       try {
         const ids = await chain.listMarketIds();
+
+        // Settlement prices come from the Resolved event — the market struct
+        // does not keep them — so a settled market can show what it settled
+        // against instead of an em dash. Only paid for on the Settled tab, and
+        // cached inside chain.js.
+        // `typeof` guard, not just .catch(): `chain` is injectable (the tests
+        // pass a partial mock), and calling an undefined method throws
+        // synchronously — which took the whole endpoint to its 500 handler
+        // rather than degrading to "no settle price".
+        const settled =
+          closed && typeof chain.settlePrices === "function"
+            ? await chain.settlePrices().catch((e) => {
+                console.warn(`[onchain/markets] settle prices unavailable: ${e.message}`);
+                return new Map();
+              })
+            : new Map();
 
         // FTSO feed id → symbol, so a market read straight from chain can still
         // carry its asset (and therefore its icon, spot price and strike).
@@ -366,6 +426,7 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
                 resolved,
                 outcome: resolved ? mk.outcome : null,
                 strike: mk.strike ?? null,
+                settlePrice: resolved ? (settled.get(id) ?? null) : null,
                 spot,
                 yesPrice: resolved
                   ? (mk.outcome === 0 ? 1 : 0)
@@ -374,21 +435,33 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
                 // rounded to cents serializes as 0 — every demo bet on this
                 // deployment rendered as "0 volume".
                 oi: r6(pools.yes + pools.no),
+                // Filled from the indexed Bet events right after this map.
                 bets: 0,
               };
             }),
           )
         ).filter(Boolean);
 
+        const counts = await betCounts(rows.map((r) => r.marketId));
+        for (const r of rows) r.bets = counts.get(r.marketId) ?? 0;
+
         // Settled: most recently closed first. Open: soonest to close first.
         rows.sort((a, b) => (closed ? b.closeTs - a.closeTs : a.closeTs - b.closeTs));
-        return res.json(rows.slice(0, 20));
+        const out = rows.slice(0, 20);
+        marketCache[cacheKey] = { at: Date.now(), rows: out };
+        return res.json(out);
       } catch (e) {
-        // Live on-chain read failed (RPC issue, etc). No index and no live
-        // data available — return an honest empty list instead of masking
-        // the outage with stale seeded data.
         console.warn(`[onchain/markets] live chain read failed: ${e.message}`);
-        return res.json([]);
+        // Prefer a stale-but-real list over an empty one. Still real markets,
+        // just read a moment ago.
+        if (marketCache[cacheKey]) {
+          res.set("x-molfi-stale", "1");
+          return res.json(marketCache[cacheKey].rows);
+        }
+        // Nothing cached: say the chain is unreachable rather than claiming
+        // there are no markets. 503 lets the UI show "reconnecting" instead of
+        // an empty venue.
+        return res.status(503).json({ error: "coston2 unreachable", retry: true });
       }
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -413,6 +486,12 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       const spot = symbol ? (lastPrice[symbol] ?? null) : null;
       const cadence = Number(/\((\d+)m\)/.exec(mk.question)?.[1]) || undefined;
       const pools = await chain.escrowPools(req.params.id).catch(() => ({ yes: 0, no: 0 }));
+      // Same reason as the list endpoint: the settle price lives in the
+      // Resolved event, not in the market struct.
+      const settlePrice =
+        resolved && typeof chain.settlePrices === "function"
+          ? ((await chain.settlePrices().catch(() => new Map())).get(req.params.id) ?? null)
+          : null;
 
       res.json({
         marketId: req.params.id,
@@ -425,12 +504,13 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
         resolved,
         outcome: resolved ? mk.outcome : null,
         strike: mk.strike ?? null,
+        settlePrice,
         spot,
         yesPrice: resolved
           ? mk.outcome === 0 ? 1 : 0
           : impliedYes(spot, mk.strike ?? null, mk.closeTs * 1000, Date.now()),
         oi: r6(pools.yes + pools.no),
-        bets: 0,
+        bets: (await betCounts([req.params.id])).get(req.params.id) ?? 0,
       });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -672,6 +752,23 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
       // injects uint256(uint160(recipient)) as a public input and the verifier
       // checks it, so without this the on-chain claim reverts with BadProof.
       const p = await zk.proveNote(note, recipient);
+
+      // Publish the root BEFORE handing back a proof. Every note derives its own
+      // root inside the circuit, and `claim` rejects any root the admin has not
+      // registered — so a proof returned without this step is guaranteed to
+      // revert with UnknownRoot. Doing it here (rather than at commit time) also
+      // keeps the commit unlinkable to the later claim by root.
+      let rootTx = null;
+      try {
+        const reg = await keeper.ensureConfidentialRoot(marketId, t, p.root);
+        rootTx = reg.hash ?? null;
+      } catch (e) {
+        // Better an honest 503 than a proof the chain will refuse.
+        return res.status(503).json({
+          error: `claim root could not be published on-chain: ${e.message.split("\n")[0]}`,
+        });
+      }
+
       res.json({
         resolved: true,
         won: true,
@@ -680,6 +777,7 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
         tier: t,
         proof: p.proof,
         root: p.root,
+        rootTx,
         nullifierHash: p.nullifierHash,
         recipientField: p.recipientField,
       });
@@ -789,20 +887,14 @@ export function createApp({ db, chain, zk, lastPrice = {} }) {
     res.json([]);
   });
 
-  app.get("/api/markets/:id/orderbook", async (req, res) => {
-    const m = await Markets.findOne({ _id: req.params.id });
-    if (!m) return res.status(404).json({ error: "not found" });
-    const yes = impliedYesMkt(m, lastPrice[m.symbol]);
-    const mk = (side) =>
-      Array.from({ length: 6 }, (_, i) => {
-        const px = side === "bid" ? yes - (i + 1) * 0.01 : yes + (i + 1) * 0.01;
-        return { price: Math.min(0.99, Math.max(0.01, px)), size: Math.round(50 + ((i * 137) % 500)) };
-      });
-    res.json({ yes: { bids: mk("bid"), asks: mk("ask") } });
-  });
+  // GET /api/markets/:id/orderbook is GONE. It synthesised six bids and six
+  // asks from `50 + ((i * 137) % 500)` and served them as a real book. Molfi
+  // is pari-mutuel — there is no book — so the UI now shows the actual pools.
 
-  // Records the bet to Mongo ONLY — the REAL on-chain bet is done by the app's
-  // wallet. The backend never broadcasts a transaction.
+  // Records the bet to Mongo ONLY — the REAL on-chain bet is signed and sent by
+  // the user's own wallet. This endpoint never broadcasts one. (The market
+  // keeper does broadcast, but only to create and resolve markets; it never
+  // touches a user's stake.)
   app.post("/api/bet", async (req, res) => {
     const { marketId, side, amount, address } = req.body ?? {};
     if (!marketId || !["yes", "no"].includes(side) || !(Number(amount) > 0) || !address) {

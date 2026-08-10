@@ -55,20 +55,6 @@ export async function fetchBackendPrices(symbol: string, limit = 240): Promise<P
   return r.json();
 }
 
-export interface OrderLevel {
-  price: number;
-  size: number;
-}
-export interface OrderBook {
-  yes: { bids: OrderLevel[]; asks: OrderLevel[] };
-}
-
-export async function fetchBackendOrderbook(id: string): Promise<OrderBook | null> {
-  const r = await fetch(`${BASE}/api/markets/${encodeURIComponent(id)}/orderbook`);
-  if (!r.ok) return null;
-  return r.json();
-}
-
 export interface BackendPosition {
   _id: string;
   marketId: string;
@@ -224,6 +210,8 @@ export interface OnChainMarketRef {
   icon?: string;
   cadenceMins?: number;
   strike?: number;
+  /** Oracle price the market settled against, from MolfiMarket's Resolved event. */
+  settlePrice?: number | null;
   spot?: number | null;
   yesPrice?: number;
   oi?: number;
@@ -493,7 +481,16 @@ export async function fetchOnChainMarkets(
 ): Promise<OnChainMarketRef[]> {
   const qs = status === "closed" ? "?status=closed" : "";
   const r = await fetch(`${BASE}/api/onchain/markets${qs}`);
-  if (!r.ok) return [];
+  // THROW, don't return []. Swallowing the failure made an unreachable chain
+  // render as "no markets yet" — a dead venue rather than an outage. The query
+  // that calls this surfaces the error state instead.
+  if (!r.ok) {
+    throw new Error(
+      r.status === 503
+        ? "Coston2 is not responding right now."
+        : `Couldn't load markets (${r.status}).`,
+    );
+  }
   return r.json();
 }
 
@@ -552,7 +549,11 @@ export function onChainMarketToRow(m: OnChainMarketRef): LeverxMarketRow {
     category: "crypto",
     source: "stellar",
     onchainStatus: m.resolved ? 2 : 0,
-    onchainOutcome: 2,
+    // The REAL winning side, not a hardcoded 2 ("unknown"). The catalog card
+    // needs it to label a settled market rather than offering UP/DOWN on a
+    // market that has already resolved.
+    onchainOutcome: m.resolved ? (m.outcome ?? 2) : 2,
+    settlePrice: m.settlePrice ?? null,
   };
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, CloudOff } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { MarketGridSkeleton } from "@/components/ui/market-skeleton";
 import { AssetBadge } from "@/components/AssetBadge";
@@ -42,6 +42,8 @@ import { cn } from "@/lib/utils";
 interface Props {
   markets: LeverxMarketRow[];
   offline?: boolean;
+  /** Why the chain is unreachable, when it is. */
+  offlineMessage?: string | null;
   emptyTitle?: string;
   emptyDescription?: string;
 }
@@ -49,6 +51,7 @@ interface Props {
 export function PredictMarketsGrid({
   markets,
   offline,
+  offlineMessage,
   emptyTitle = ui.emptyMarkets,
   emptyDescription = ui.emptyMarketsHint,
 }: Props) {
@@ -90,7 +93,21 @@ export function PredictMarketsGrid({
   }
 
   if (markets.length === 0 && offline) {
-    return <MarketGridSkeleton />;
+    // Was an endless <MarketGridSkeleton />, which reads as a hung page — the
+    // shimmer never resolves because the chain, not the render, is the problem.
+    // Say so, and let the 15s poll recover on its own.
+    return (
+      <div className={pageState}>
+        <EmptyState
+          icon={CloudOff}
+          title="Can't reach Coston2"
+          description={
+            offlineMessage ??
+            "Flare's RPC isn't responding. Markets will reappear on their own — this page keeps retrying."
+          }
+        />
+      </div>
+    );
   }
 
   return (
@@ -159,7 +176,44 @@ export function PredictMarketsGrid({
                 />
 
                 <div className={marketCardActions}>
-                  <MarketSideActions market={source} stretch className="w-full" />
+                  {/*
+                    A settled market must not offer UP/DOWN. The contract already
+                    refuses a bet after close, but the card was still rendering
+                    two tradeable buttons on a decided market — and showed no
+                    outcome or settle price at all. Say what happened instead.
+                  */}
+                  {source.onchainStatus === 2 ? (
+                    <div className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-background/60 px-3 py-2 text-xs">
+                      <span
+                        className={cn(
+                          "font-semibold",
+                          source.onchainOutcome === 0
+                            ? "text-[var(--long-text)]"
+                            : source.onchainOutcome === 1
+                              ? "text-[var(--short-text)]"
+                              : "text-muted-foreground",
+                        )}
+                      >
+                        {source.onchainOutcome === 0
+                          ? "Settled YES"
+                          : source.onchainOutcome === 1
+                            ? "Settled NO"
+                            : "Settled"}
+                      </span>
+                      {source.settlePrice != null ? (
+                        <span className="font-mono text-muted-foreground">
+                          at{" "}
+                          {source.settlePrice >= 100
+                            ? `$${source.settlePrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                            : `$${source.settlePrice.toLocaleString(undefined, { maximumFractionDigits: 6 })}`}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">awaiting settlement</span>
+                      )}
+                    </div>
+                  ) : (
+                    <MarketSideActions market={source} stretch className="w-full" />
+                  )}
                 </div>
 
                 <div className={marketCardMeta}>

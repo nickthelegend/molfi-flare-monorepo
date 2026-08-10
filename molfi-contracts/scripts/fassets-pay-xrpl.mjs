@@ -111,8 +111,30 @@ try {
     wallet = Wallet.fromSeed(funded.seed);
     console.log(`  account ${wallet.address} · ${funded.amount} XRP`);
     console.log(`  SEED (save as XRPL_SEED to reuse): ${funded.seed}`);
-    // The faucet payment needs a ledger to close before the account is usable.
-    await new Promise((res) => setTimeout(res, 5000));
+    // The faucet payment needs a ledger to close before the account exists.
+    //
+    // A fixed 5s wait was not enough — the testnet routinely takes longer, and
+    // the next call then died on `actNotFound` with a funded account that
+    // simply had not been validated yet. Poll for it instead.
+    process.stdout.write(`  waiting for the account to validate `);
+    let live = false;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((res) => setTimeout(res, 3000));
+      try {
+        await client.getXrpBalance(wallet.address);
+        live = true;
+        break;
+      } catch {
+        process.stdout.write(".");
+      }
+    }
+    console.log(live ? " ok" : "");
+    if (!live) {
+      throw new Error(
+        `account ${wallet.address} still not on ledger after 90s. ` +
+          `The faucet funded it but the testnet has not validated; re-run in a moment.`,
+      );
+    }
   }
 
   const bal = await client.getXrpBalance(wallet.address);

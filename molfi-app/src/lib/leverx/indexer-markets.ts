@@ -30,6 +30,8 @@ export interface LeverxMarketRow {
   question?: string;
   onchainStatus?: number;
   onchainOutcome?: number;
+  /** Oracle price a settled market resolved against (null while open). */
+  settlePrice?: number | null;
   /** Market thumbnail (Polymarket image/icon URL). Falls back to the asset badge. */
   iconUrl?: string;
   /** Category id ("crypto" | "sports" | "politics" | …) for filtering + labels. */

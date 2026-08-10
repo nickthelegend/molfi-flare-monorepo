@@ -49,9 +49,16 @@ const chain = defineChain({
   nativeCurrency: { name: "Coston2 Flare", symbol: "C2FLR", decimals: 18 },
   rpcUrls: { default: { http: [RPC] } }, testnet: true,
 });
-const pub = createPublicClient({ chain, transport: http(RPC) });
+/**
+ * Coston2's public RPC rate-limits and answers 429 with an HTML error page.
+ * viem's default three fast retries burn through in about a second, which is
+ * not enough when the shared gateway is busy — so back off further and longer.
+ * It costs nothing when the RPC is healthy.
+ */
+const transport = http(RPC, { retryCount: 8, retryDelay: 1500, timeout: 30_000 });
+const pub = createPublicClient({ chain, transport });
 const op = privateKeyToAccount(KEY);
-const wallet = createWalletClient({ account: op, chain, transport: http(RPC) });
+const wallet = createWalletClient({ account: op, chain, transport });
 
 const SENDER = getAddress(D.fcc.molfiInstructionSender);
 const BOOK = getAddress(D.contracts.sealedBidBook);

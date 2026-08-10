@@ -9,26 +9,17 @@
  * `/v1/protocol` after `deploy_and_share`, or optional `VITE_LEVERX_*` env vars.
  */
 
-/** DeepBook Predict testnet (predict-testnet-4-16). */
+/**
+ * DeepBook Predict testnet (predict-testnet-4-16).
+ *
+ * Only the two fields that survive on Flare are kept. The object ids that used
+ * to live here — and the whole TESTNET_LEVERX block — were deleted because
+ * nothing may default to another chain's live deployment; see the note on
+ * `predictId` below.
+ */
 const TESTNET_PREDICT = {
-  serverUrl: "https://predict-server.testnet.mystenlabs.com",
-  predictId: "0xc8736204d12f0a7277c86388a68bf8a194b0a14c5538ad13f22cbd8e2a38028a",
-  packageId: "0xf5ea2b3749c65d6e56507cc35388719aadb28f9cab873696a2f8687f5c785138",
-  registryId: "0x43af14fed5480c20ff77e2263d5f794c35b9fab7e2212903127062f4fe2a6e64",
   quoteType:
     "0xe95040085976bfd54a1a07225cd46c8a2b4e8e2b6732f140a0fc49850ba73e1a::dusdc::DUSDC",
-} as const;
-
-/** Published LeverX package (testnet). Shared objects filled via indexer or .env. */
-const TESTNET_LEVERX = {
-  packageId:
-    "0x97b41ca2ed4948d2b448ca4031d1727ee2dfd2c1e9c086748c758e069a366825",
-  registryId:
-    "0xc165f33bffbdaf02209690f4ad7aa5090aa214bcba80e23d9be6e52db676de93",
-  vaultId:
-    "0x249afdb0a91126b12c262dc57ee871582376874b65ad857df54887a2145c96f3",
-  feeCollectorId:
-    "0xcdcee4fd12114732e8933039a3bbb3954b7db70444f351eee8cf71a62d0452fa",
 } as const;
 
 function viteEnv(name: string): string {
@@ -136,17 +127,34 @@ function resolveFirebaseConfig():
 export const appConfig = {
   suiNetwork: "testnet" as const,
 
-  predictServerUrl: TESTNET_PREDICT.serverUrl,
-  predictId: viteEnv("VITE_PREDICT_ID") || TESTNET_PREDICT.predictId,
-  predictPackageId: viteEnv("VITE_PREDICT_PACKAGE_ID") || TESTNET_PREDICT.packageId,
-  predictRegistryId: TESTNET_PREDICT.registryId,
+  /** Env-only, for the same reason as the object ids below. */
+  predictServerUrl: viteEnv("VITE_PREDICT_SERVER_URL"),
+
+  /**
+   * The Sui object ids are NOT defaulted, for the same reason the indexer hosts
+   * above are not.
+   *
+   * Defaulting `leverxRegistryId` to a live testnet object made
+   * `useLeverxProtocolConfig`'s `enabled: Boolean(registryId)` gate true on
+   * every page load, so the header and the markets grid issued `sui_getObject`
+   * calls to fullnode.testnet.sui.io — a different chain, from an app that
+   * settles on Flare. They always failed, and `useVisibleMarketAsks` already
+   * documents that having no order-book config is the NORMAL state here
+   * (Molfi's markets are pari-mutuel, priced from FTSOv2).
+   *
+   * Empty means every downstream `enabled` gate is false and no request is
+   * made. Anyone actually running the Sui deployment sets VITE_PREDICT_ID /
+   * VITE_LEVERX_* and gets the old behaviour back.
+   */
+  predictId: viteEnv("VITE_PREDICT_ID"),
+  predictPackageId: viteEnv("VITE_PREDICT_PACKAGE_ID"),
+  predictRegistryId: viteEnv("VITE_PREDICT_REGISTRY_ID"),
   quoteType: TESTNET_PREDICT.quoteType,
 
-  leverxPackageId: viteEnv("VITE_LEVERX_PACKAGE_ID") || TESTNET_LEVERX.packageId,
-  leverxRegistryId: viteEnv("VITE_LEVERX_REGISTRY_ID") || TESTNET_LEVERX.registryId,
-  leverxVaultId: viteEnv("VITE_LEVERX_VAULT_ID") || TESTNET_LEVERX.vaultId,
-  feeCollectorId:
-    viteEnv("VITE_LEVERX_FEE_COLLECTOR_ID") || TESTNET_LEVERX.feeCollectorId,
+  leverxPackageId: viteEnv("VITE_LEVERX_PACKAGE_ID"),
+  leverxRegistryId: viteEnv("VITE_LEVERX_REGISTRY_ID"),
+  leverxVaultId: viteEnv("VITE_LEVERX_VAULT_ID"),
+  feeCollectorId: viteEnv("VITE_LEVERX_FEE_COLLECTOR_ID"),
 
   /** Optional fallback when indexer has not indexed keeper_address yet. */
   keeperAddress: viteEnv("VITE_KEEPER_ADDRESS"),
@@ -184,10 +192,15 @@ export const appConfig = {
   /** True when `leverxIndexerWsUrl` is configured (streams require direct indexer host). */
   indexerStreamEnabled: Boolean(leverxIndexerWsUrl),
 
-  /** DeepBook spot OHLCV (chart visualization only). */
-  deepbookIndexerUrl:
-    viteEnv("VITE_DEEPBOOK_INDEXER_URL") ||
-    "https://deepbook-indexer.mainnet.mystenlabs.com",
+  /**
+   * DeepBook spot OHLCV (chart visualization only) — env-only, no default.
+   *
+   * This defaulted to `deepbook-indexer.mainnet.mystenlabs.com`, a Sui mainnet
+   * host, and shipped in the bundle. Molfi charts price from FTSOv2 via its own
+   * backend; nothing here should ever reach a Sui service. Empty disables the
+   * fetch outright (see `fetchDeepbookOhlcv`).
+   */
+  deepbookIndexerUrl: viteEnv("VITE_DEEPBOOK_INDEXER_URL"),
 
   /** Vertical RANGE instruments in trade UI and market actions. */
   rangeEnabled: false,

@@ -25,6 +25,18 @@ function baseUrl(): string {
   return appConfig.predictServerUrl.replace(/\/$/, "");
 }
 
+/**
+ * Whether a DeepBook Predict server is configured for this deployment.
+ *
+ * Molfi settles on Flare and runs no predict-server, so every helper below
+ * would otherwise fire at predict-server.testnet.mystenlabs.com — a third
+ * party on a different chain — and fail. That leaked out of the markets grid
+ * and the market-detail route loader on every load.
+ */
+export function predictServerConfigured(): boolean {
+  return Boolean(appConfig.predictServerUrl);
+}
+
 function predictId(): string {
   return appConfig.predictId;
 }
@@ -57,6 +69,9 @@ export async function fetchPredictOracles(): Promise<PredictOracleSummary[]> {
 }
 
 export async function fetchOracleState(oracleId: string): Promise<PredictOracleDetail> {
+  if (!predictServerConfigured()) {
+    throw new Error("No DeepBook Predict server is configured for this deployment.");
+  }
   const data = await fetchJson<unknown>(`${baseUrl()}/oracles/${oracleId}/state`, {
     timeoutMs: 60_000,
   });
@@ -66,7 +81,7 @@ export async function fetchOracleState(oracleId: string): Promise<PredictOracleD
 export async function fetchOraclePriceLatest(
   oracleId: string,
 ): Promise<{ spot: number; timestampMs?: number } | null> {
-  if (!oracleId) return null;
+  if (!oracleId || !predictServerConfigured()) return null;
   try {
     const data = await fetchJson<PredictOraclePriceUpdate>(
       `${baseUrl()}/oracles/${oracleId}/prices/latest`,

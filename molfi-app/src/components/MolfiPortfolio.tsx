@@ -102,11 +102,21 @@ export function MolfiPortfolio({ address }: { address: string }) {
   // Bets placed directly on-chain (wallet → PredictEscrow) never touch the
   // backend's log, so the portfolio has to read the escrow too — otherwise a
   // real, escrowed stake shows as "No trades yet".
-  const { data: chainPositions = [] } = useQuery({
+  const { data: chainPositions = [], isLoading: chainLoading } = useQuery({
     queryKey: ["molfi-onchain-positions", address],
     queryFn: () => fetchOnChainPositionsForWallet(address),
     refetchInterval: 15_000,
   });
+
+  // BOTH queries have to settle before "No trades yet" is the truth.
+  //
+  // The indexed one answers in milliseconds and, for a wallet that only ever
+  // bet on-chain, answers `[]`. The escrow read behind the second one walks
+  // every market on Coston2 and takes seconds. Gating the empty state on the
+  // fast query alone therefore rendered "No trades yet" to a wallet with eight
+  // settled positions, for as long as the chain read took — the one screen a
+  // judge opens to check the app has real history.
+  const loading = isLoading || chainLoading;
 
   const positions = useMemo<BackendPosition[]>(() => {
     const seen = new Set(backendPositions.map((p) => `${p.marketId}:${p.side}`));
@@ -205,7 +215,23 @@ export function MolfiPortfolio({ address }: { address: string }) {
     return pts;
   }, [settled]);
 
-  if (!isLoading && positions.length === 0) {
+  // Nothing known yet: say so, rather than render the summary against no data.
+  //
+  // The escrow read takes seconds, and every headline below it is a reduction
+  // over `positions` — so painting the frame early shows "+0.00 FXRP realized,
+  // 0/0 settled" to a wallet that has eight settled trades. Zeros that later
+  // become real numbers read as a wrong answer, not a pending one.
+  if (loading && positions.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-8">
+        <p className="text-center text-sm text-muted-foreground">
+          Reading your positions from Coston2…
+        </p>
+      </div>
+    );
+  }
+
+  if (!loading && positions.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card">
         <EmptyState

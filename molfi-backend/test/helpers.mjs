@@ -119,13 +119,37 @@ after(() => {
   }
 });
 
+/**
+ * A keeper that records `registerRoot` calls instead of signing them.
+ *
+ * The real one sends an admin transaction to Coston2, which a test must never
+ * do — and could not do usefully anyway, since these market ids are synthetic.
+ * Tests that care assert against `.roots`.
+ */
+export function mockKeeper(overrides = {}) {
+  const roots = [];
+  return {
+    roots,
+    ensureConfidentialRoot: async (marketId, tier, root) => {
+      roots.push({ marketId, tier, root: String(root) });
+      return { registered: true, alreadyKnown: false, hash: "0x" + "ab".repeat(32) };
+    },
+    ...overrides,
+  };
+}
+
 /** Boot an app on a shared in-memory Mongo + http server. Returns { base, url, close }. */
-export async function bootApp({ chain = mockChain(), zk = realZk, lastPrice = {} } = {}) {
+export async function bootApp({
+  chain = mockChain(),
+  zk = realZk,
+  keeper = mockKeeper(),
+  lastPrice = {},
+} = {}) {
   const uri = await sharedMongoUri();
   const client = new MongoClient(uri);
   await client.connect();
   const db = client.db(`molfi_test_${++_dbSeq}`);
-  const app = createApp({ db, chain, zk, lastPrice });
+  const app = createApp({ db, chain, zk, keeper, lastPrice });
   const server = await new Promise((resolve) => {
     const s = app.listen(0, () => resolve(s));
   });
@@ -134,6 +158,7 @@ export async function bootApp({ chain = mockChain(), zk = realZk, lastPrice = {}
   return {
     base,
     db,
+    keeper,
     url: (path) => `${base}${path}`,
     async get(path) {
       const r = await fetch(`${base}${path}`);

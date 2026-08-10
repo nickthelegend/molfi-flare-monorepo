@@ -56,15 +56,23 @@ export function formatUsdcBalance(amount: number | null | undefined, ready: bool
   return formatUsdc(amount);
 }
 
-/** Market settlement time — e.g. "Jun 12, 15:45". */
+/**
+ * Market settlement time — e.g. "Jun 12, 15:45 UTC".
+ *
+ * UTC, and labelled as such, because the market QUESTION states its deadline in
+ * UTC ("Will BTC be above $64,000 at 09:00 PM UTC?"). Rendering the close time
+ * in the viewer's zone put two different clock times on the same card for the
+ * same instant, which reads as a bug. One zone, named.
+ */
 export function formatAutoClose(expiry: number): string {
-  return new Date(expiry).toLocaleString("en-US", {
+  return `${new Date(expiry).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  });
+    timeZone: "UTC",
+  })} UTC`;
 }
 
 /** Compact pill label in the header. */

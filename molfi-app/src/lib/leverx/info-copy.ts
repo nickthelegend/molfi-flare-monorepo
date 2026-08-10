@@ -167,7 +167,6 @@ export const leverxInfo = {
   landingKeeper:
     "A helper is a small app you run in the background. It keeps markets fair and you can earn fees when yours completes work first.",
 
-  keeperPull: "Official download for the LeverX helper app.",
   keeperPrivateKey:
     "A demo wallet that pays network fees. Use a separate wallet with only enough for fees — never share your main key.",
   keeperKeyHint: "Add your key as an environment variable. Never save it in code or commit it to git.",

@@ -204,7 +204,10 @@ export function LandingInteractiveGrid({ className }: { className?: string }) {
   useEffect(() => {
     if (reducedMotion) return;
     const root = rootRef.current;
-    const hero = root?.closest(".landing-hero");
+    // Typed as HTMLElement, not the Element that `closest` returns by default —
+    // pointer events only exist on HTMLElementEventMap, so the untyped form
+    // fails the typecheck even though it works at runtime.
+    const hero = root?.closest<HTMLElement>(".landing-hero");
     if (!root || !hero) return;
 
     const onMove = (event: PointerEvent) => {

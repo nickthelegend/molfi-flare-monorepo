@@ -9,7 +9,17 @@ import {
 } from "@/lib/leverx/market-trade-intent";
 import type { PredictSide } from "@/lib/predict/instruments";
 
-type LinkProps = Omit<ComponentProps<typeof Link>, "to" | "params">;
+/**
+ * The anchor props these wrappers forward to `<Link>`.
+ *
+ * `Omit<ComponentProps<typeof Link>, "to" | "params">` collapsed TanStack's
+ * generic Link union into a shape that no longer knew about the
+ * `/predictions/$oracleId` params, so `params={{ oracleId }}` errored and every
+ * spread through these wrappers errored with it. `to` and `params` are written
+ * literally inside `TradeIntentLink` — where TanStack infers them correctly —
+ * so callers only ever need the plain anchor props.
+ */
+type LinkProps = Omit<ComponentProps<"a">, "href">;
 
 function TradeIntentLink({
   intent,

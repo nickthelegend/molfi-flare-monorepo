@@ -10,8 +10,13 @@
  * This module is IMPORT-SAFE: importing it does NOT connect Mongo or listen.
  * The connect + poller + listen path runs only when the file is executed
  * directly (`node server.js`). Tests import `createApp` from ./app.js with an
- * in-memory Mongo and never touch this start path. The backend NEVER broadcasts
- * a transaction.
+ * in-memory Mongo and never touch this start path.
+ *
+ * KEEPERS BROADCAST. Read paths are still read-only, but three background loops
+ * sign transactions when MOLFI_KEEPER_KEY is set: rolling on-chain markets
+ * forward, settling them from FTSOv2, and relaying FDC attestations. None of
+ * them is privileged — every one of those calls is permissionless on-chain, so
+ * the keeper is a convenience that keeps the venue live, not an authority.
  */
 import { MongoClient } from "mongodb";
 import { fileURLToPath } from "node:url";
@@ -20,6 +25,7 @@ import { createApp } from "./app.js";
 import * as chain from "./chain.js";
 import * as zk from "./zk.js";
 import * as web2json from "./web2json.js";
+import * as marketKeeper from "./market-keeper.js";
 
 const PORT = Number(process.env.PORT) || 4000;
 
@@ -238,6 +244,33 @@ async function main() {
 
   const app = createApp({ db, chain, zk, lastPrice });
 
+  // ── On-chain market keeper ────────────────────────────────────────────────
+  // MolfiMarket only ever gained a market when someone ran a script, so once
+  // those closed the app's main page had nothing to bet on — 58 markets created
+  // and settled, none open. This rolls them forward and settles them.
+  async function keepOnchainMarkets() {
+    if (!marketKeeper.keeper) return;
+    const market = chain.CONTRACTS.market;
+    if (!market) return;
+
+    const { created, skipped } = await marketKeeper.ensureOnchainMarkets({
+      market, feeds: chain.FEEDS, lastPrice,
+    });
+    if (skipped && !warnedKeeper) {
+      console.warn(`[molfi-backend] on-chain market keeper idle: ${skipped}`);
+      warnedKeeper = true;
+    }
+    if (created.length) {
+      // Nudge the read path so the new market shows up without waiting a poll.
+      await OnchainMarkets.deleteMany({ _id: { $in: created.map((c) => c.id) } }).catch(() => {});
+    }
+    const ids = await chain.listMarketIds().catch(() => []);
+    // Only the recent tail — resolving is idempotent but scanning 58 markets
+    // every tick is 58 reads nobody needs.
+    await marketKeeper.resolveDue({ market, marketIds: ids.slice(-12) });
+  }
+  let warnedKeeper = false;
+
   // ── Web2Json feed keeper ──────────────────────────────────────────────────
   // A feed only means something if it is refreshed: `getFreshPrice` reverts once
   // an observation ages past a market's staleness bound, which is correct but
@@ -292,6 +325,11 @@ async function main() {
   // Checked every 5 min, but only ATTESTS when the observation is older than
   // MOLFI_WEB2_REFRESH_SECONDS — each attestation is an on-chain fee plus a
   // full FDC round, so polling cheaply and acting rarely is the point.
+  keepOnchainMarkets().catch((e) => console.warn(`[molfi-backend] market keeper: ${e.message}`));
+  setInterval(
+    () => keepOnchainMarkets().catch((e) => console.warn(`[molfi-backend] market keeper: ${e.message}`)),
+    60_000,
+  );
   refreshWeb2Feeds().catch((e) => console.warn(`[molfi-backend] web2 keeper: ${e.message}`));
   setInterval(
     () => refreshWeb2Feeds().catch((e) => console.warn(`[molfi-backend] web2 keeper: ${e.message}`)),

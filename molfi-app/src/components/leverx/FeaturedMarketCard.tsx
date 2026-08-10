@@ -8,7 +8,6 @@ import { LivePriceChart } from "@/components/LivePriceChart";
 import { fetchBackendPrices } from "@/lib/molfi-backend";
 import { MarketTradeLink } from "@/components/leverx/MarketTradeLink";
 import { AnimatedAssetPrice, AnimatedCompactUsd } from "@/components/ui/animated-numbers";
-import { useVisibleMarketAsks } from "@/hooks/useVisibleMarketAsks";
 import { usePayoutMultiplier } from "@/hooks/usePayoutMultiplier";
 import { useNow } from "@/hooks/useNow";
 import { formatAutoClose } from "@/lib/leverx/placeholders";
@@ -43,7 +42,8 @@ export function FeaturedMarketCard({
     if (rangeRow) rows.push(rangeRow);
     return rows;
   }, [market, downRow, rangeRow]);
-  const { markets: quoted } = useVisibleMarketAsks(askRows);
+  // See useMarketsUpDisplay: the Sui order-book quote was inert here too.
+  const quoted = askRows;
   const upQuote = quoted[0] ?? market;
   const downQuote = quoted[1] ?? downRow;
   const rangeQuote = rangeRow ? (quoted[2] ?? rangeRow) : null;

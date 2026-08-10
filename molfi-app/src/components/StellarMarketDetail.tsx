@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -27,6 +27,8 @@ import {
   escrowRedeem,
   escrowPosition,
   escrowPool,
+  fxrpBalance,
+  confidentialPoolStatus,
   confidentialCommitBatch,
   confidentialClaim,
 } from "@/lib/stellar/soroban";
@@ -42,7 +44,6 @@ import {
 } from "@/lib/stellar/contracts";
 import {
   fetchBackendMarket,
-  fetchBackendOrderbook,
   fetchBackendPrices,
   fetchOnChainMarket,
   fetchPositions,
@@ -52,7 +53,6 @@ import {
   isBackendMarketId,
   placeBet,
   type BackendPosition,
-  type OrderLevel,
 } from "@/lib/molfi-backend";
 import {
   loadConfNotes,
@@ -62,7 +62,7 @@ import {
 } from "@/lib/confidential-notes";
 import { MarketCommentsPanel } from "@/components/leverx/comments/MarketCommentsPanel";
 import { useMarketComments } from "@/hooks/useMarketComments";
-import { showError, showTxSuccess } from "@/lib/toast";
+import { showError, showTxSuccess, showTxError } from "@/lib/toast";
 import {
   pageSimple,
   tradeStatItem,
@@ -159,66 +159,136 @@ function fmtUsd(v: number | null | undefined, _symbol: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Order book (live, from the backend)
+// Pool depth
 // ---------------------------------------------------------------------------
 
-function OrderBookPanel({ id }: { id: string }) {
-  const { data } = useQuery({
-    queryKey: ["backend-orderbook", id],
-    queryFn: () => fetchBackendOrderbook(id),
-    refetchInterval: 8_000,
-  });
-  const ob = data?.yes;
+/**
+ * The real pari-mutuel pools, replacing what used to be a fake order book.
+ *
+ * Both detail views previously rendered a symmetric ladder built from
+ * `size: 50 + ((i * 137) % 500)` — six invented bids and six invented asks
+ * around the mid — under the caption "Indicative depth from other traders".
+ * Nobody had placed those orders, and Molfi has no order book to place them
+ * on: it is pari-mutuel, so price is just each side's share of the pot.
+ *
+ * This shows the pot instead. Every number here is read from the escrow
+ * contract, so an empty market honestly looks empty.
+ */
+function PoolDepthPanel({
+  yes,
+  no,
+  loading,
+  note,
+}: {
+  yes: number | null;
+  no: number | null;
+  loading?: boolean;
+  note: ReactNode;
+}) {
+  const total = (yes ?? 0) + (no ?? 0);
+  // With nothing staked there is no market-implied price. Show the even split
+  // the contract would pay rather than dividing by zero.
+  const yesShare = total > 0 ? (yes ?? 0) / total : 0.5;
+  const fmt = (v: number | null) =>
+    v == null ? "—" : `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })} FXRP`;
 
-  const Row = ({ lvl, kind }: { lvl: OrderLevel; kind: "bid" | "ask" }) => {
-    const pct = Math.min(100, (lvl.size / 600) * 100);
-    return (
-      <div className="relative flex items-center justify-between px-3 py-1 font-mono text-xs">
+  const Side = ({
+    label,
+    amount,
+    share,
+    kind,
+  }: {
+    label: string;
+    amount: number | null;
+    share: number;
+    kind: "yes" | "no";
+  }) => (
+    <div className="px-3 py-2.5">
+      <div className="relative mb-1.5 flex items-center justify-between font-mono text-xs">
         <span
-          className={cn("absolute inset-y-0 right-0", kind === "bid" ? "bg-[var(--long-bg)]" : "bg-[var(--short-bg)]")}
-          style={{ width: `${pct}%`, opacity: 0.5 }}
+          className={cn(
+            "absolute inset-y-0 left-0 rounded-sm",
+            kind === "yes" ? "bg-[var(--long-bg)]" : "bg-[var(--short-bg)]",
+          )}
+          style={{ width: `${Math.round(share * 100)}%`, opacity: 0.45 }}
           aria-hidden
         />
-        <span className={cn("relative z-10", kind === "bid" ? "text-[var(--long-text)]" : "text-[var(--short-text)]")}>
-          {Math.round(lvl.price * 100)}¢
+        <span
+          className={cn(
+            "relative z-10 font-semibold",
+            kind === "yes" ? "text-[var(--long-text)]" : "text-[var(--short-text)]",
+          )}
+        >
+          {label} {Math.round(share * 100)}%
         </span>
-        <span className="relative z-10 text-muted-foreground">{lvl.size}</span>
+        <span className="relative z-10 text-muted-foreground">{fmt(amount)}</span>
       </div>
-    );
-  };
+    </div>
+  );
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-border bg-card">
       <div className="flex items-center justify-between border-b border-border px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        <span>Order book · YES</span>
-        <span>size</span>
+        <span>Pool depth</span>
+        <span>staked</span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {ob ? (
-          <>
-            {[...ob.asks].reverse().map((l, i) => (
-              <Row key={`a${i}`} lvl={l} kind="ask" />
-            ))}
-            <div className="border-y border-border bg-background px-3 py-1 text-center font-mono text-[11px] text-accent">
-              market
-            </div>
-            {ob.bids.map((l, i) => (
-              <Row key={`b${i}`} lvl={l} kind="bid" />
-            ))}
-          </>
+        {loading ? (
+          <div className="p-4 text-xs text-muted-foreground">Reading pools…</div>
         ) : (
-          <div className="p-4 text-xs text-muted-foreground">Loading book…</div>
+          <>
+            <Side label="YES" amount={yes} share={yesShare} kind="yes" />
+            <div className="border-y border-border bg-background px-3 py-1 text-center font-mono text-[11px] text-accent">
+              {Math.round(yesShare * 100)}¢ · {fmt(total)} in the pot
+            </div>
+            <Side label="NO" amount={no} share={1 - yesShare} kind="no" />
+            {total === 0 ? (
+              <p className="px-3 py-3 text-[11px] leading-snug text-muted-foreground">
+                Nothing staked yet. The first bet sets the pools.
+              </p>
+            ) : null}
+          </>
         )}
       </div>
       <div className="flex items-start gap-1.5 border-t border-border px-3 py-2 text-[10px] leading-snug text-muted-foreground">
         <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
-        <span>
-          Indicative depth from other traders. A normal bet escrows FXRP publicly on-chain —
-          your side and size are visible and verifiable. Only a <strong>confidential</strong> bet
-          hides which side you took, via a commitment note and a Groth16 proof.
-        </span>
+        <span>{note}</span>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Order book (live, from the backend)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mongo-mirror markets carry no escrow, so the only truthful depth is the
+ * open interest the backend recorded. The fabricated ladder that used to live
+ * here is gone along with its `/orderbook` endpoint.
+ */
+function OrderBookPanel({ id }: { id: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["backend-market-depth", id],
+    queryFn: () => fetchBackendMarket(id),
+    refetchInterval: 8_000,
+  });
+  const oi = data?.oi ?? null;
+  const yesShare = data?.yesPrice ?? 0.5;
+
+  return (
+    <PoolDepthPanel
+      yes={oi == null ? null : oi * yesShare}
+      no={oi == null ? null : oi * (1 - yesShare)}
+      loading={isLoading}
+      note={
+        <>
+          Open interest recorded by the Molfi engine for this mirrored market.
+          Tradeable markets on the <strong>Crypto</strong> tab escrow real FXRP
+          on-chain.
+        </>
+      }
+    />
   );
 }
 
@@ -327,7 +397,9 @@ function BackendDetail({ id }: { id: string }) {
       showTxSuccess(`Bet ${amt} FXRP on ${side.toUpperCase()}`);
       await queryClient.invalidateQueries({ queryKey: ["positions", address] });
     } catch (e) {
-      showError(e instanceof Error ? e.message : "Bet failed");
+      // showTxError, not showError: this is a raw chain error and must go
+      // through formatTxError before a human sees it.
+      showTxError(e);
     } finally {
       setPlacing(false);
     }
@@ -468,8 +540,9 @@ function BackendDetail({ id }: { id: string }) {
 
 /** YES order book — indicative depth around the live odds, plus the REAL
  * FXRP currently escrowed on-chain in the pot. */
-function OnChainOrderBookPanel({ id, yesPrice }: { id: string; yesPrice: number }) {
-  const { data } = useQuery({
+/** YES/NO depth straight from the escrow contract's pools. */
+function OnChainOrderBookPanel({ id }: { id: string }) {
+  const { data, isLoading } = useQuery({
     queryKey: ["escrow-pools", id],
     queryFn: async () => ({
       yes: Number(await escrowPool(id, OUTCOME.YES)) / FXRP_UNIT,
@@ -477,56 +550,45 @@ function OnChainOrderBookPanel({ id, yesPrice }: { id: string; yesPrice: number 
     }),
     refetchInterval: 12_000,
   });
-  const locked = (data?.yes ?? 0) + (data?.no ?? 0);
-  const mid = Math.min(0.99, Math.max(0.01, yesPrice || 0.5));
-  const ladder = (kind: "bid" | "ask") =>
-    Array.from({ length: 6 }, (_, i) => {
-      const px = kind === "bid" ? mid - (i + 1) * 0.01 : mid + (i + 1) * 0.01;
-      return { price: Math.min(0.99, Math.max(0.01, px)), size: Math.round(50 + ((i * 137) % 500)) };
-    });
-  const Row = ({ lvl, kind }: { lvl: { price: number; size: number }; kind: "bid" | "ask" }) => {
-    const pct = Math.min(100, (lvl.size / 600) * 100);
-    return (
-      <div className="relative flex items-center justify-between px-3 py-1 font-mono text-xs">
-        <span
-          className={cn("absolute inset-y-0 right-0", kind === "bid" ? "bg-[var(--long-bg)]" : "bg-[var(--short-bg)]")}
-          style={{ width: `${pct}%`, opacity: 0.5 }}
-          aria-hidden
-        />
-        <span className={cn("relative z-10", kind === "bid" ? "text-[var(--long-text)]" : "text-[var(--short-text)]")}>
-          {Math.round(lvl.price * 100)}¢
-        </span>
-        <span className="relative z-10 text-muted-foreground">{lvl.size}</span>
-      </div>
-    );
-  };
+
   return (
-    <div className="flex h-full flex-col rounded-xl border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        <span>Order book · YES</span>
-        <span>size</span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {[...ladder("ask")].reverse().map((l, i) => (
-          <Row key={`a${i}`} lvl={l} kind="ask" />
-        ))}
-        <div className="border-y border-border bg-background px-3 py-1 text-center font-mono text-[11px] text-accent">
-          {Math.round(mid * 100)}¢ · {locked.toLocaleString()} FXRP locked
-        </div>
-        {ladder("bid").map((l, i) => (
-          <Row key={`b${i}`} lvl={l} kind="bid" />
-        ))}
-      </div>
-      <div className="flex items-start gap-1.5 border-t border-border px-3 py-2 text-[10px] leading-snug text-muted-foreground">
-        <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
-        <span>Indicative depth from other traders. Bets escrow real FXRP transparently on-chain — every position is public &amp; verifiable.</span>
-      </div>
-    </div>
+    <PoolDepthPanel
+      yes={data?.yes ?? null}
+      no={data?.no ?? null}
+      loading={isLoading}
+      note={
+        <>
+          Read live from the predict-escrow contract on Coston2 — this is the
+          real staked FXRP, not indicative depth. A normal bet is public and
+          verifiable; only a <strong>confidential</strong> bet hides which side
+          you took, via a commitment note and a Groth16 proof.
+        </>
+      }
+    />
   );
 }
 
-/** The connected wallet's on-chain escrow positions on this market. */
-function OnChainPositionsPanel({ id, address }: { id: string; address: string | null }) {
+/**
+ * @param resolved      market has settled
+ * @param winner        winning outcome once resolved (0 = YES, 1 = NO)
+ * @param onRedeem      claim the payout; only rendered on a winning leg
+ * @param redeeming     a redeem is in flight
+ */
+function OnChainPositionsPanel({
+  id,
+  address,
+  resolved,
+  winner,
+  onRedeem,
+  redeeming,
+}: {
+  id: string;
+  address: string | null;
+  resolved: boolean;
+  winner: number | null;
+  onRedeem: () => void;
+  redeeming: boolean;
+}) {
   const { data: pos } = useQuery({
     queryKey: ["escrow-pos", id, address],
     queryFn: async () => ({
@@ -595,7 +657,10 @@ function OnChainPositionsPanel({ id, address }: { id: string; address: string | 
                   <tr className="border-b border-border text-[10px] uppercase tracking-wide text-muted-foreground">
                     <th className="px-3 py-1.5 text-left font-medium">Side</th>
                     <th className="px-3 py-1.5 text-right font-medium">Stake</th>
-                    <th className="px-3 py-1.5 text-right font-medium">Est. payout if win</th>
+                    {/* Once settled, "if win" is answered — say what happened. */}
+                    <th className="px-3 py-1.5 text-right font-medium">
+                      {resolved ? "Result" : "Est. payout if win"}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -614,14 +679,50 @@ function OnChainPositionsPanel({ id, address }: { id: string; address: string | 
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right font-mono">{b.amount.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right font-mono text-[var(--long-text)]">
-                        {estPayout(b.outcome, b.amount).toFixed(2)}
+                      <td className="px-3 py-2 text-right font-mono">
+                        {!resolved ? (
+                          <span className="text-[var(--long-text)]">
+                            {estPayout(b.outcome, b.amount).toFixed(2)}
+                          </span>
+                        ) : winner == null ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : b.outcome === winner ? (
+                          <span className="text-[var(--long-text)]">
+                            Won · {estPayout(b.outcome, b.amount).toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">Lost</span>
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          ) : null}
+          {/*
+            A settled market used to render this table unchanged — "Est. payout
+            if win" against a market that had already been decided, with no
+            redeem control and no way to tell you had lost.
+          */}
+          {resolved && winner != null ? (
+            legs.some((b) => b.outcome === winner) ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
+                <span className="text-xs text-muted-foreground">
+                  {winner === OUTCOME.NO ? "NO" : "YES"} won — your stake and share of the pot are
+                  claimable.
+                </span>
+                <Button size="sm" onClick={onRedeem} disabled={redeeming} className="gap-1.5">
+                  {redeeming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Redeem winnings
+                </Button>
+              </div>
+            ) : (
+              <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+                This market settled {winner === OUTCOME.NO ? "NO" : "YES"}, so this position did not
+                win. Nothing to claim.
+              </p>
+            )
           ) : null}
         </>
       )}
@@ -702,7 +803,9 @@ function OnChainDetail({ id }: { id: string }) {
   const { address, connect } = useWallet();
   const queryClient = useQueryClient();
   const [side, setSide] = useState<number>(OUTCOME.YES);
-  const [amount, setAmount] = useState("100");
+  // 1 FXRP, not 100. The Coston2 faucet dispenses 10 FXRP, so a default of 100
+  // meant the first click every new user made was a validation error.
+  const [amount, setAmount] = useState("1");
 
   // Honour the side the user clicked on the market card.
   //
@@ -724,7 +827,11 @@ function OnChainDetail({ id }: { id: string }) {
   const [confBusy, setConfBusy] = useState<string | null>(null); // "commit" | nullifier | null
   /** Free-form confidential stake. Decomposed into standard notes below, so
    *  the user picks any number while each note stays in a uniform pool. */
-  const [confAmount, setConfAmount] = useState("10");
+  // Tier 0 (1 FXRP). The default was 10, which is tier 1 — and the pool is
+  // seeded per tier, so the out-of-the-box stake was the one size the pool
+  // could not cover. Start at the smallest note so the flow works on a
+  // freshly seeded pool.
+  const [confAmount, setConfAmount] = useState("1");
 
   const marketQuery = useQuery({
     queryKey: ["onchain-market", id],
@@ -732,6 +839,45 @@ function OnChainDetail({ id }: { id: string }) {
     refetchInterval: 15_000,
   });
   const m = marketQuery.data;
+
+  /**
+   * Spendable FXRP, so the ticket can say "you don't have this" before it
+   * costs a signature.
+   *
+   * Without it, betting more than you hold reached the contract and came back
+   * as a raw viem revert — ABI signature, every Groth16 limb, a docs link —
+   * shown verbatim to the user.
+   */
+  // Same key and same RAW-atoms return as FaucetButton, deliberately: React
+  // Query dedupes by key, so a scaled queryFn here would have handed whichever
+  // component mounted second the other one's units. Scale at the consumer.
+  const balanceQuery = useQuery({
+    queryKey: ["fxrp-balance", address],
+    queryFn: () => fxrpBalance(address as string),
+    enabled: Boolean(address),
+    refetchInterval: 20_000,
+  });
+  const balance = balanceQuery.data == null ? null : Number(balanceQuery.data) / FXRP_UNIT;
+  const betInFlight = useRef(false);
+
+  /** Why this ticket cannot be submitted, in the user's terms — or null. */
+  const betError = (() => {
+    const amt = Number(amount);
+    if (!amount.trim()) return "Enter an amount.";
+    if (!Number.isFinite(amt) || amt <= 0) return "Enter an amount greater than zero.";
+    // FXRP carries 6 decimals. Anything finer truncates to zero atoms on the
+    // way to the contract, so the bet would cost gas and escrow nothing.
+    if (amt < 1 / FXRP_UNIT) return "The smallest bet is 0.000001 FXRP.";
+    if ((amount.split(".")[1]?.length ?? 0) > 6) {
+      return "FXRP has 6 decimal places — trim the extra digits.";
+    }
+    if (balance != null && amt > balance) {
+      return balance === 0
+        ? "You have no FXRP yet — get some from the faucet in the header."
+        : `You have ${balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} FXRP.`;
+    }
+    return null;
+  })();
   const pricesQuery = useQuery({
     queryKey: ["backend-prices", m?.symbol],
     queryFn: () => fetchBackendPrices(m!.symbol, 240),
@@ -769,11 +915,51 @@ function OnChainDetail({ id }: { id: string }) {
     }
   })();
 
+  /**
+   * Whether the confidential pool can actually pay this stake if it wins.
+   *
+   * `confidentialPoolStatus` existed but nothing called it, so the Private tab
+   * would happily take a commitment against a pool holding 0 FXRP — the stake
+   * goes in, and the later claim reverts with "pool is topping up liquidity"
+   * forever. Never accept a bet that cannot be paid.
+   */
+  const confPoolQuery = useQuery({
+    // `planStake` returns TIER INDICES, not note objects.
+    queryKey: ["conf-pool-status", confPlan.notes.join(",")],
+    queryFn: async () => {
+      const tiers = [...new Set(confPlan.notes)];
+      const rows = await Promise.all(
+        tiers.map(async (tier) => ({ tier, ...(await confidentialPoolStatus(tier)) })),
+      );
+      // Enough claims covered for every note we are about to commit at that tier.
+      return rows.map((r) => ({
+        ...r,
+        needed: confPlan.notes.filter((t) => t === r.tier).length,
+      }));
+    },
+    enabled: confidential && confPlan.notes.length > 0,
+    refetchInterval: 30_000,
+  });
+
+  const confPoolError = (() => {
+    const rows = confPoolQuery.data;
+    if (!rows?.length) return null;
+    const short = rows.find((r) => Number(r.claimsCovered) < r.needed);
+    if (!short) return null;
+    return Number(short.claimsCovered) === 0
+      ? "The private pool has no liquidity right now, so a winning note could not be paid. Use a standard bet, or try again once the pool is topped up."
+      : `The private pool can only cover ${Number(short.claimsCovered)} claim(s) at this note size right now — lower the stake or use a standard bet.`;
+  })();
+
   const commentsState = useMarketComments(id);
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["escrow-pools", id] });
     await queryClient.invalidateQueries({ queryKey: ["escrow-pos", id] });
+    // The wallet balance moved too. Without this the ticket and the header
+    // faucet pill both kept showing the pre-bet number for up to 20 seconds,
+    // which reads as "the bet didn't take".
+    await queryClient.invalidateQueries({ queryKey: ["fxrp-balance", address] });
   };
 
   // Confidential notes live in the browser — only the owner holds the secret that
@@ -788,6 +974,7 @@ function OnChainDetail({ id }: { id: string }) {
    *  be claimed here, at this size. */
   const handleConfidentialBet = async () => {
     if (!address) return void connect();
+    if (confPoolError) return showError(confPoolError);
     setConfBusy("commit");
     try {
       const sideStr = side === OUTCOME.YES ? "YES" : "NO";
@@ -883,8 +1070,14 @@ function OnChainDetail({ id }: { id: string }) {
 
   const handleBet = async () => {
     if (!address) return void connect();
+    // Checked here as well as on the button: the button can be bypassed by
+    // Enter, and a stale balance read should not turn into a raw revert.
+    if (betError) return showError(betError);
+    // Synchronous latch — `placing` is state, so two clicks in the same tick
+    // both get through and the node rejects the second as "already known".
+    if (betInFlight.current) return;
+    betInFlight.current = true;
     const amt = Number(amount);
-    if (!(amt > 0)) return showError("Enter an amount");
     setPlacing(true);
     try {
       const sideLabel = side === OUTCOME.YES ? "YES" : "NO";
@@ -906,8 +1099,11 @@ function OnChainDetail({ id }: { id: string }) {
       }
       await refresh();
     } catch (e) {
-      showError(e instanceof Error ? e.message : "Bet failed");
+      // showTxError, not showError: this is a raw chain error and must go
+      // through formatTxError before a human sees it.
+      showTxError(e);
     } finally {
+      betInFlight.current = false;
       setPlacing(false);
     }
   };
@@ -1013,7 +1209,14 @@ function OnChainDetail({ id }: { id: string }) {
               <StatItem label={`${m.symbol} spot`} value={fmtUsd(m.spot, m.symbol)} />
               <StatItem label="Strike" value={fmtUsd(m.strike, m.symbol)} />
               <StatItem label="YES odds" value={`${yesPct}%`} />
-              <StatItem label="Oracle" value="FTSOv2" />
+              {/* Once settled, what it settled against matters more than the
+                  oracle's name — and an em dash on a resolved market reads as
+                  missing data. */}
+              {resolved ? (
+                <StatItem label="Settled at" value={fmtUsd(m.settlePrice, m.symbol)} />
+              ) : (
+                <StatItem label="Oracle" value="FTSOv2" />
+              )}
               <StatItem
                 label="Closes"
                 value={resolved ? "Resolved" : closed ? "Settling" : fmtRemaining(remaining)}
@@ -1033,7 +1236,7 @@ function OnChainDetail({ id }: { id: string }) {
           </div>
 
           <div className={tradeTerminalOrderbook}>
-            <OnChainOrderBookPanel id={id} yesPrice={yesPrice} />
+            <OnChainOrderBookPanel id={id} />
           </div>
 
           <aside className={tradeTerminalSidebar}>
@@ -1152,7 +1355,7 @@ function OnChainDetail({ id }: { id: string }) {
                         className="border-border bg-background font-mono"
                       />
                       <div className="flex gap-1.5">
-                        {[10, 50, 137, 500].map((preset) => (
+                        {[1, 10, 50, 137].map((preset) => (
                           <button
                             key={preset}
                             type="button"
@@ -1168,6 +1371,8 @@ function OnChainDetail({ id }: { id: string }) {
                           the user should see exactly which. */}
                       {confPlan.error ? (
                         <p className="text-[10px] text-destructive">{confPlan.error}</p>
+                      ) : confPoolError ? (
+                        <p className="text-[10px] leading-snug text-destructive">{confPoolError}</p>
                       ) : (
                         <p className="text-[10px] leading-snug text-muted-foreground">
                           Committed as{" "}
@@ -1193,7 +1398,11 @@ function OnChainDetail({ id }: { id: string }) {
                     </div>
                     <Button
                       onClick={handleConfidentialBet}
-                      disabled={confBusy === "commit" || Boolean(confPlan.error)}
+                      disabled={
+                        confBusy === "commit" ||
+                        Boolean(confPlan.error) ||
+                        Boolean(address && confPoolError)
+                      }
                       className="w-full gap-1.5"
                       size="lg"
                     >
@@ -1213,14 +1422,29 @@ function OnChainDetail({ id }: { id: string }) {
                 ) : (
                   <>
                     <div>
-                      <label className="text-xs uppercase tracking-wide text-muted-foreground">Amount (FXRP)</label>
+                      <div className="flex items-baseline justify-between">
+                        <label className="text-xs uppercase tracking-wide text-muted-foreground">Amount (FXRP)</label>
+                        {balance != null ? (
+                          <button
+                            type="button"
+                            onClick={() => setAmount(String(Math.floor(balance * 100) / 100))}
+                            className="font-mono text-[10px] text-muted-foreground transition hover:text-accent"
+                          >
+                            Balance {balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} · max
+                          </button>
+                        ) : null}
+                      </div>
                       <Input
                         type="number"
                         min={1}
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
+                        aria-invalid={Boolean(betError)}
                         className="mt-1 border-border bg-background font-mono"
                       />
+                      {betError ? (
+                        <p className="mt-1 text-[11px] text-destructive">{betError}</p>
+                      ) : null}
                     </div>
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Est. payout if {side === OUTCOME.YES ? "YES" : "NO"} wins</span>
@@ -1230,7 +1454,12 @@ function OnChainDetail({ id }: { id: string }) {
                       Estimate only — pari-mutuel, net of the 2% fee. It moves as the
                       pools fill, and is final only at close.
                     </p>
-                    <Button onClick={handleBet} disabled={placing} className="w-full gap-1.5" size="lg">
+                    <Button
+                      onClick={handleBet}
+                      disabled={placing || Boolean(address && betError)}
+                      className="w-full gap-1.5"
+                      size="lg"
+                    >
                       {placing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                       {address ? `Bet on-chain · ${side === OUTCOME.YES ? "YES" : "NO"}` : "Connect wallet"}
                     </Button>
@@ -1262,7 +1491,14 @@ function OnChainDetail({ id }: { id: string }) {
           </aside>
 
           <div className={tradeTerminalPositions}>
-            <OnChainPositionsPanel id={id} address={address} />
+            <OnChainPositionsPanel
+              id={id}
+              address={address}
+              resolved={resolved}
+              winner={resolved ? (m.outcome ?? null) : null}
+              onRedeem={handleRedeem}
+              redeeming={redeeming}
+            />
           </div>
         </div>
 
@@ -1288,9 +1524,15 @@ export function StellarMarketDetail({ oracleId }: { oracleId: string }) {
     <section className={cn(pageSimple, "max-w-2xl")}>
       <BackLink />
       <div className="rounded-xl border border-border bg-card p-6">
+        {/*
+          This used to read "a live reference market sourced from Polymarket".
+          Nothing in the app has ever fetched Polymarket, and the only way to
+          land here is an id that is neither an on-chain market nor a backend
+          one — i.e. a bad or stale link. Say that instead.
+        */}
         <p className="text-sm text-muted-foreground">
-          This is a live reference market sourced from Polymarket. Tradeable on-chain markets live on
-          the <strong className="text-foreground">Crypto</strong> tab.
+          No market matches this link. It may have been mistyped, or the market may have been
+          removed. Live markets are on the <strong className="text-foreground">Crypto</strong> tab.
         </p>
         <Link to="/markets" className="mt-4 inline-block">
           <Button size="sm">Browse Molfi markets</Button>

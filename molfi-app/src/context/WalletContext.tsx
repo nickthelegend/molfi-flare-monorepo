@@ -13,10 +13,6 @@ import {
   clearWalletScopedQueries,
   invalidateWalletScopedQueries,
 } from "@/lib/leverx/invalidate-queries";
-import type { WalletWithRequiredFeatures } from "@mysten/wallet-standard";
-import type { WalletAccount } from "@wallet-standard/core";
-import type { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
-import { suiClient } from "@/lib/sui/client";
 import { setWalletClient } from "@/lib/stellar/soroban";
 
 /**
@@ -26,7 +22,9 @@ import { setWalletClient } from "@/lib/stellar/soroban";
  * The connected account's viem wallet client is wired into the on-chain layer
  * (`setWalletClient`) so writes sign through the user's wallet. The context keeps
  * its original interface shape so the premium UI compiles unchanged; the legacy
- * Sui fields (`client`, `simulationSender`) are retained only for compatibility.
+ * The Sui `client` field is gone: it was documented as compatibility-only and
+ * its last consumers (the DeepBook Predict quote hooks) have been removed, so
+ * the @mysten SDK is no longer part of this app.
  */
 
 /** Retained read-only sender for legacy dev-inspect reads during transition. */
@@ -34,15 +32,13 @@ export const READONLY_SENDER =
   "0x0000000000000000000000000000000000000000000000000000000000000001";
 
 interface WalletContextValue {
-  client: SuiJsonRpcClient;
-  wallets: WalletWithRequiredFeatures[];
-  wallet: WalletWithRequiredFeatures | null;
-  account: WalletAccount | null;
+  wallets: never[];
+  wallet: null;
   address: string | null;
   isWalletConnected: boolean;
   simulationSender: string;
   connecting: boolean;
-  connect: (wallet?: WalletWithRequiredFeatures) => Promise<void>;
+  connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   refreshWallets: () => void;
   /** Legacy no-op on EVM (writes go through the connected wallet client). */
@@ -86,10 +82,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<WalletContextValue>(
     () => ({
-      client: suiClient,
       wallets: [],
       wallet: null,
-      account: address ? ({ address } as unknown as WalletAccount) : null,
       address: address ?? null,
       isWalletConnected: isConnected,
       simulationSender: READONLY_SENDER,

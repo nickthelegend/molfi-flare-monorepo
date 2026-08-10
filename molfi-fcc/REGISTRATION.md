@@ -5,11 +5,11 @@ Registered and verified on Coston2. Reproduce with `scripts/register.sh`.
 | | |
 |---|---|
 | `FlareTeeManager` | `0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE` |
-| `EXTENSION_ID` | `0x…0101cc` (65996) |
-| `InstructionSender` | `0x64799fc225db28d52cAe8593214E8AB372C658A3` |
-| TEE machine | `0xD114B9B601B77D5Fa1EBdc82bdcafCdB7129f205` |
+| `EXTENSION_ID` | `0x…01023c` (66108) |
+| `InstructionSender` | `0xF91a16Ae48609927EA9220508dda9DEA2149B846` |
+| TEE machine | `0x0A752D897f7D61Ce0690EEF812027000813467bb` |
 | **Status** | **`2` = PRODUCTION** |
-| `SealedBidBook` | `0x22B0F197b12e86653d449326b7677e65e2162c90` |
+| `SealedBidBook` | `0x10B3199147B5B08b15224d1b6149b5e32697396C` |
 | Enclave sealing key | `0x02a26c712091177a68e3d1b68cf7ce4a4010b76653382c76a9b11c3d05b9eae77c` |
 | Enclave signer (`teeSigner`) | `0x6a066930CD29B1e3f9c697B7dc13cc18a0824069` |
 
@@ -18,7 +18,7 @@ Verified independently of the tooling that wrote it:
 ```bash
 cast call 0x1a9C4A0f9D76c0b1D91d22E24E573a9b377618aE \
   "getTeeMachineStatus(address)(uint8)" \
-  0xD114B9B601B77D5Fa1EBdc82bdcafCdB7129f205 \
+  0x0A752D897f7D61Ce0690EEF812027000813467bb \
   --rpc-url https://coston2-api.flare.network/ext/C/rpc
 # → 2
 ```
@@ -272,7 +272,7 @@ openMarketFromTee accepted · 0x8b70ec744717f7ddbe0783afead2930d5ac7f6d675365410
 winner claimed 1 FXRP · 0x01e79bd33a663af2dbda677670b4400627ac8d656135caefa03e58ab9fb44686
 ```
 
-Note the node address is **not** the registered machine `0xD114B9B6…`: the node
+Note the node address is **not** the registered machine `0x0A752D89…`: the node
 key is regenerated on every container start with no persistence, so a restart
 invalidates it. `setTeeMachine` exists for that, and the script rotates before
 opening rather than failing mysteriously.

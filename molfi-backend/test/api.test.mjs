@@ -381,6 +381,9 @@ test("GET /api/onchain/markets splits open vs settled and strands neither", asyn
     chain: mockChain({
       async listMarketIds() { return [open, pastClose, settled]; },
       async escrowPools() { return { yes: 0.0011, no: 0, total: 0.0011 }; },
+      // Settle prices come from the Resolved event; the endpoint must carry
+      // them through for settled markets and leave open ones null.
+      async settlePrices() { return new Map([[settled, 1.0402]]); },
       async getMarketFull(id) {
         return {
           question: "Will XRP/USD be >= $1.06? (15m)",
@@ -403,6 +406,9 @@ test("GET /api/onchain/markets splits open vs settled and strands neither", asyn
   const s = closedTab.body.find((m) => m.marketId === settled);
   assert.equal(s.resolved, true);
   assert.equal(s.outcome, 1);
+  assert.equal(s.settlePrice, 1.0402);
+  // An open market has not settled against anything yet.
+  assert.equal(openTab.body[0].settlePrice, null);
   assert.equal(s.yesPrice, 0);
 
   // Past close but unresolved is still "closed" for tab purposes, not resolved.

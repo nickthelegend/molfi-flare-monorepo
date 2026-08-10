@@ -1,4 +1,5 @@
-import type { Tween } from "gsap";
+// `GSAPTween` is not a named export of "gsap" (it lives on the global namespace as
+// gsap.core.GSAPTween, aliased to GSAPTween).
 import { ensureGsapPlugins, gsap } from "@/lib/animation/gsap-config";
 import { prefersReducedMotion } from "@/lib/animation/counter";
 
@@ -8,13 +9,13 @@ export type ScrollToOptions = {
   onComplete?: () => void;
 };
 
-let activeTween: Tween | null = null;
+let activeTween: GSAPTween | null = null;
 
 export function getMaxScrollY(): number {
   return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
 }
 
-export function animateScrollTo(y: number, options: ScrollToOptions = {}): Tween | null {
+export function animateScrollTo(y: number, options: ScrollToOptions = {}): GSAPTween | null {
   ensureGsapPlugins();
 
   const target = gsap.utils.clamp(0, getMaxScrollY(), y);

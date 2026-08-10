@@ -45,9 +45,20 @@ const chain = defineChain({
   nativeCurrency: { name: "Coston2 Flare", symbol: "C2FLR", decimals: 18 },
   rpcUrls: { default: { http: [RPC] } }, testnet: true,
 });
-const pub = createPublicClient({ chain, transport: http(RPC) });
+/**
+ * Coston2's public RPC rate-limits, and answers 429 with an HTML error page.
+ *
+ * This script's own load is trivial, but the gateway is shared — a keeper, a
+ * frontend and another demo running at the same time are enough to trip it.
+ * viem's default of three fast retries burns through in about a second and then
+ * throws, which killed a run mid-flow at the "waiting for close" poll: the one
+ * place the script is guaranteed to sit spinning for a minute. Backing off
+ * further and for longer costs nothing when the RPC is healthy.
+ */
+const transport = http(RPC, { retryCount: 8, retryDelay: 1500, timeout: 30_000 });
+const pub = createPublicClient({ chain, transport });
 const op = privateKeyToAccount(KEY);
-const wallet = createWalletClient({ account: op, chain, transport: http(RPC) });
+const wallet = createWalletClient({ account: op, chain, transport });
 
 const MARKET = getAddress(D.contracts.molfiMarket);
 const ESCROW = getAddress(D.contracts.predictEscrow);
@@ -122,7 +133,15 @@ step(1, "FXRP — real FAssets collateral");
 const startFxrp = await pub.readContract({ address: FXRP, abi: ERC20, functionName: "balanceOf", args: [op.address] });
 const mint = JSON.parse(readFileSync(`${HERE}../../molfi-contracts/deployments/fassets-mint.json`, "utf8"));
 ok(`holding ${show(startFxrp)} · minted via FAssets, XRPL ${mint.xrplTxHash.slice(0, 12)}… FDC round ${mint.votingRoundId}`);
-if (startFxrp < fxrp(2)) bad(`need at least 2 FXRP to run the flow`);
+// A hard stop, not a warning. Every later stage stakes FXRP, so continuing
+// without it does not degrade — it reaches `bet` or `sealBid` and dies on an
+// undecoded revert selector, which reads like a broken contract rather than an
+// empty wallet. Say the real reason, and where to fix it.
+if (startFxrp < fxrp(2)) {
+  bad(`need at least 2 FXRP to run the flow — this wallet holds ${show(startFxrp)}`);
+  console.error(`    top up ${op.address} with FXRP, or mint via FAssets, then re-run.`);
+  process.exit(1);
+}
 
 // ── 2 ──────────────────────────────────────────────────────────────────────
 step(2, "market — created on MolfiMarket, settled by FTSOv2");
@@ -161,7 +180,17 @@ else ok("the enclave refuses to open a live market — the split does not exist 
 // ── wait for close ─────────────────────────────────────────────────────────
 process.stdout.write(`\n  waiting for close`);
 for (;;) {
-  const now = (await pub.getBlock()).timestamp;
+  // Even with the backoff above, a long enough rate-limit window can outlast
+  // the retries. Waiting for a clock to pass is the one step that can simply be
+  // tried again, so a failed read must not end the run.
+  let now;
+  try {
+    now = (await pub.getBlock()).timestamp;
+  } catch {
+    process.stdout.write("~");
+    await sleep(5_000);
+    continue;
+  }
   if (now >= closeTs) break;
   process.stdout.write(".");
   await sleep(Math.min(15_000, (Number(closeTs - now) + 3) * 1000));
@@ -187,6 +216,12 @@ ok(`instruction ${instructionId.slice(0, 18)}… on-chain · ${link(req.hash)}`)
 
 process.stdout.write("  waiting for a machine the REGISTRY chose to answer");
 let action = null;
+// Keep the last signed-but-unusable answer. A machine that replies with
+// `status: 3` HAS answered — the pipeline worked and the identity is real; the
+// extension simply overran tee-node's hard 2s ProxyTimeout. That is a completely
+// different failure from silence, and saying "no usable result" for both sends
+// you looking for a broken registration when the RPC was the problem.
+let refused = null;
 for (let i = 0; i < 60 && !action; i++) {
   await sleep(5000);
   process.stdout.write(".");
@@ -194,9 +229,19 @@ for (let i = 0; i < 60 && !action; i++) {
   if (!res?.ok) continue;
   const body = await res.json().catch(() => null);
   if (body?.result?.data && body.result.data !== "0x" && body?.signature) action = body;
+  else if (body?.signature) refused = body;
 }
 console.log();
-if (!action) { bad(`no usable result for ${instructionId}`); process.exit(1); }
+if (!action && refused) {
+  bad(`a machine answered and signed, but with no data (status ${refused.result?.status})`);
+  console.error(`    log: ${refused.result?.log ?? "(none)"}`);
+  console.error(`    tee-node allows the extension a hard 2s. A cold read against a`);
+  console.error(`    rate-limited public RPC overruns it, and the proxy publishes only`);
+  console.error(`    this first result — the retry that succeeds is not fetchable.`);
+  console.error(`    Point the enclave at a dedicated RPC endpoint and re-run.`);
+  process.exit(1);
+}
+if (!action) { bad(`no machine answered for ${instructionId} — check the registration`); process.exit(1); }
 ok(`answered · status ${action.result.status} · tag "${action.result.submissionTag}"`);
 
 const machine = await pub.readContract({ address: BOOK, abi: BOOK_ABI, functionName: "teeMachine" });

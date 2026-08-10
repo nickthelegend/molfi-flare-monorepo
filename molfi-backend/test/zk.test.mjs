@@ -65,6 +65,46 @@ test("confidential/prepare-claim WON path generates a real proof for the winning
     assert.equal(body.proof.a.length, 2);
     assert.match(String(body.root), /^\d+$/);
     assert.match(String(body.nullifierHash), /^\d+$/);
+
+    // The root MUST have been published for this exact (market, tier) before
+    // the proof was returned. ConfidentialBet.claim rejects an unregistered
+    // root outright, so a proof handed back without this is dead on arrival —
+    // which is exactly what shipped until the claim path was wired to the
+    // keeper. Assert the registration, not just the proof.
+    assert.deepEqual(h.keeper.roots, [{ marketId: MKT, tier: 0, root: String(body.root) }]);
+    assert.match(String(body.rootTx), /^0x[0-9a-f]{64}$/);
+  } finally {
+    await h.close();
+  }
+});
+
+test("confidential/prepare-claim refuses to hand back a proof it could not publish", async () => {
+  // A proof whose root is not on-chain is worse than no proof: the wallet pays
+  // gas for a claim that always reverts with UnknownRoot. 503 instead.
+  const h = await bootApp({
+    chain: mockChain({ isResolved: async () => true, winningOutcome: async () => 0 }),
+    keeper: {
+      ensureConfidentialRoot: async () => {
+        throw new Error("keeper is out of gas");
+      },
+    },
+  });
+  try {
+    const MKT = "0x" + "fe".repeat(32);
+    const { status, body } = await h.post("/api/confidential/prepare-claim", {
+      note: {
+        secret: zk.confField(),
+        nullifier: zk.confField(),
+        outcome: zk.sideSignal(MKT, 0, 0),
+        recipient: zk.confField(),
+      },
+      marketId: MKT,
+      tier: 0,
+      recipient: "0x1111111111111111111111111111111111111111",
+    });
+    assert.equal(status, 503);
+    assert.match(body.error, /claim root could not be published/);
+    assert.equal(body.proof, undefined);
   } finally {
     await h.close();
   }

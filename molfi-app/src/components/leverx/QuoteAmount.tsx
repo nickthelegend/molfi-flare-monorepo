@@ -135,11 +135,14 @@ export function QuoteAmount({
         {text}
       </span>
       {locked ? (
-        <Lock
-          className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400"
-          aria-hidden
-          title={lockedTitle}
-        />
+        // `title` is not a lucide prop; put it on a wrapper so the tooltip
+        // still appears and the icon stays decorative.
+        <span title={lockedTitle} className="inline-flex shrink-0">
+          <Lock
+            className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400"
+            aria-hidden
+          />
+        </span>
       ) : null}
       <QuoteIcon symbol={sym} size={iconSize} className={cn("shrink-0", iconClassName)} />
     </span>

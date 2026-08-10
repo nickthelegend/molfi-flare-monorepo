@@ -16,6 +16,7 @@ import {
 import { pageTitle } from "@/lib/brand";
 import { ui } from "@/lib/copy";
 import { MARKET_CATEGORIES, DEFAULT_CATEGORY } from "@/lib/market-categories";
+import { FEEDS } from "@/lib/stellar/contracts";
 import {
   marketsCatalogRegion,
   pageSimple,
@@ -38,6 +39,16 @@ import {
   writeMarketListView,
   type MarketListView,
 } from "@/lib/market-list-view";
+
+/**
+ * The assets Molfi actually settles, listed from the configured FTSOv2 feeds.
+ *
+ * This used to be the hardcoded string "BTC, ETH, SOL, XLM" — neither SOL nor
+ * XLM has ever had a feed here, and XLM was a leftover from the pre-Flare
+ * version. Deriving it means the copy cannot drift from what the contracts can
+ * actually price.
+ */
+const LIVE_ASSETS = Object.keys(FEEDS).join(", ");
 
 export const Route = createFileRoute("/_app/markets")({
   ...routePendingOptions,
@@ -69,6 +80,7 @@ function MarketsPage() {
   const {
     markets: catalogMarkets,
     offline,
+    errorMessage,
     loading: catalogLoading,
     comingSoon,
   } = useMolfiMarkets({ categoryId, search, status });
@@ -86,7 +98,13 @@ function MarketsPage() {
 
   return (
     <section className={pageSimple}>
-      <MarketsHeroSection />
+      {/*
+        Hidden on a coming-soon category. The hero always carries live CRYPTO
+        markets, so on the Sports tab it rendered four tradeable crypto cards
+        directly above a "Sports markets — coming soon" panel, which reads as
+        though Sports has markets.
+      */}
+      {comingSoon ? null : <MarketsHeroSection />}
 
       <div className={pageSimpleToolbar}>
         <h1 className={pageSimpleTitle}>Markets</h1>
@@ -168,7 +186,8 @@ function MarketsPage() {
         <p className="flex items-center gap-1.5 rounded-lg border border-border bg-card/60 px-3 py-2 text-xs text-muted-foreground">
           <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-accent" />
           Real on-chain markets — your stake is escrowed as FXRP in the predict-escrow contract and
-          settled by the live FTSOv2 oracle. Bets are transparent on-chain; the order-book depth is indicative.
+          settled by the live FTSOv2 oracle. Pricing is pari-mutuel: the odds are each side&apos;s
+          share of the pot, read straight from the contract.
         </p>
       ) : null}
 
@@ -183,9 +202,9 @@ function MarketsPage() {
                 {MARKET_CATEGORIES.find((c) => c.id === categoryId)?.label} markets — coming soon
               </p>
               <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                Molfi is live on <strong className="text-foreground">Crypto</strong> — auto-rolling 15 &amp;
-                30-minute markets across BTC, ETH, SOL, XLM and more, settled on-chain. More categories are
-                on the way.
+                Molfi is live on <strong className="text-foreground">Crypto</strong> — auto-rolling markets
+                on {LIVE_ASSETS}, settled on-chain by Flare&apos;s FTSOv2 oracle. More categories are on the
+                way.
               </p>
             </div>
             <button
@@ -213,6 +232,7 @@ function MarketsPage() {
           <PredictMarketsGrid
             markets={markets}
             offline={offline}
+            offlineMessage={errorMessage}
             emptyTitle={emptyTitle}
             emptyDescription={emptyDescription}
           />
@@ -224,6 +244,7 @@ function MarketsPage() {
                 sort={sort}
                 onSortChange={setSort}
                 offline={offline}
+                offlineMessage={errorMessage}
                 emptyTitle={emptyTitle}
                 emptyDescription={emptyDescription}
               />

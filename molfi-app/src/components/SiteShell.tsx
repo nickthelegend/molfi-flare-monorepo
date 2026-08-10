@@ -7,7 +7,6 @@ import { APP_NAME } from "@/lib/brand";
 import { SiteHeaderNav } from "@/components/SiteHeaderNav";
 import { HelpCircle } from "lucide-react";
 import { SiteFooter } from "@/components/SiteFooter";
-import { BalanceBreakdown } from "@/components/leverx/BalanceBreakdown";
 import { WelcomeDialog } from "@/components/leverx/WelcomeDialog";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { FaucetButton } from "@/components/FaucetButton";

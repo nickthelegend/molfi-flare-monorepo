@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { useMarketPremiumSparklines } from "@/hooks/useMarketPremiumSparklines";
-import { useVisibleMarketAsks } from "@/hooks/useVisibleMarketAsks";
 import { useVisibleOracleSpots } from "@/hooks/useVisibleOracleSpots";
 import type { LeverxMarketRow } from "@/lib/leverx/indexer-markets";
 import { gridUpDisplayRow } from "@/lib/leverx/predict-oracle-markets";
@@ -14,8 +13,12 @@ export function useMarketsUpDisplay(sourceMarkets: readonly LeverxMarketRow[]) {
 
   const { markets: withSpots } = useVisibleOracleSpots(sourceMarkets);
   const displayRows = useMemo(() => withSpots.map(gridUpDisplayRow), [withSpots]);
-  const { markets: displayMarkets, isLoading: premiumLoading } =
-    useVisibleMarketAsks(displayRows);
+  // Was useVisibleMarketAsks(displayRows) — a DeepBook Predict order-book quote
+  // over a Sui devInspect. Molfi is pari-mutuel and has no such book, so with
+  // no Sui config the hook was disabled and returned its input untouched. The
+  // rows pass through directly now, and the @mysten SDK leaves the bundle.
+  const displayMarkets = displayRows;
+  const premiumLoading = false;
   const { seriesByMarketId } = useMarketPremiumSparklines(displayMarkets);
 
   return {

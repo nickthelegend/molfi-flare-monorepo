@@ -77,6 +77,34 @@ export function LivePriceChart({
     }
     series.setData(data);
 
+    /**
+     * Pad the price axis so a quiet market does not look violent.
+     *
+     * Default autoscaling fits the visible range exactly, and these are 15-60
+     * minute windows on assets that move ~0.5% — so FTSO's real, tiny wobble
+     * was stretched to full panel height and rendered as vertical spikes that
+     * read like broken data. Anchoring the range to include the strike, then
+     * padding it, shows the move at a truthful scale: near the line means near
+     * the line.
+     */
+    if (data.length) {
+      const values = data.map((d) => d.value);
+      let lo = Math.min(...values);
+      let hi = Math.max(...values);
+      if (hasStrike) {
+        lo = Math.min(lo, strike as number);
+        hi = Math.max(hi, strike as number);
+      }
+      // Never less than 0.35% of price, so a flat window still has context.
+      const mid = (lo + hi) / 2 || 1;
+      const pad = Math.max((hi - lo) * 0.45, mid * 0.0035);
+      series.applyOptions({
+        autoscaleInfoProvider: () => ({
+          priceRange: { minValue: lo - pad, maxValue: hi + pad },
+        }),
+      });
+    }
+
     if (hasStrike) {
       series.createPriceLine({
         price: strike,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, BarChart3, ChevronsUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, BarChart3, ChevronsUpDown, CloudOff } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { MarketTableSkeleton } from "@/components/ui/market-skeleton";
 import { AssetBadge } from "@/components/AssetBadge";
@@ -166,6 +166,8 @@ interface Props {
   sort: MarketSortId;
   onSortChange: (sort: MarketSortId) => void;
   offline?: boolean;
+  /** Why the chain is unreachable, when it is. */
+  offlineMessage?: string | null;
   emptyTitle?: string;
   emptyDescription?: string;
 }
@@ -175,6 +177,7 @@ export function PredictMarketsTable({
   sort,
   onSortChange,
   offline,
+  offlineMessage,
   emptyTitle = ui.emptyMarkets,
   emptyDescription = ui.emptyMarketsHint,
 }: Props) {
@@ -215,7 +218,20 @@ export function PredictMarketsTable({
   }
 
   if (markets.length === 0 && offline) {
-    return <MarketTableSkeleton />;
+    // Same fix as the grid: an endless skeleton reads as a hung page when the
+    // real problem is that the chain/backend is unreachable.
+    return (
+      <div className={pageState}>
+        <EmptyState
+          icon={CloudOff}
+          title="Can't reach Coston2"
+          description={
+            offlineMessage ??
+            "Flare's RPC isn't responding. Markets will reappear on their own — this page keeps retrying."
+          }
+        />
+      </div>
+    );
   }
 
   return (

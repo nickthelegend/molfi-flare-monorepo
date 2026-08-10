@@ -17,12 +17,20 @@ function Frame({ children, label, className }: { children: ReactNode; label: str
   );
 }
 
-/** Price chart with target line and win/loss coloring. */
+/**
+ * Diagram of how a market resolves: price path against a strike, coloured by
+ * which side is winning.
+ *
+ * Deliberately has NO numbers on it. It used to be captioned "Live chart" and
+ * show "Now $67,842" — a hardcoded figure that contradicted the app's own BTC
+ * price two clicks away, which reads as fabricated data rather than as the
+ * explanatory diagram it actually is.
+ */
 export function LandingChartIllustration() {
   const bgId = useId();
 
   return (
-    <Frame label="Live chart">
+    <Frame label="How a market resolves">
       <svg viewBox="0 0 480 280" className="landing-illus-svg" role="img" aria-label="Price chart crossing target">
         <defs>
           <linearGradient id={bgId} x1="0" y1="0" x2="0" y2="1">
@@ -58,7 +66,7 @@ export function LandingChartIllustration() {
           Now
         </text>
         <text x="372" y="62" fill="var(--color-foreground)" fontSize="13" fontWeight="600" fontFamily="JetBrains Mono">
-          $67,842
+          above
         </text>
         <rect x="24" y="228" width="72" height="22" rx="4" fill="#38ef7d" fillOpacity="0.18" />
         <text x="32" y="243" fill="#38ef7d" fontSize="10" fontWeight="600" fontFamily="Barlow">
@@ -116,50 +124,13 @@ export function LandingMarketsIllustration() {
   );
 }
 
-/** Buy and sell prices mock. */
-export function LandingOrderBookIllustration() {
-  const buys = [
-    { px: "41¢", sz: "2.4k" },
-    { px: "40¢", sz: "1.8k" },
-    { px: "39¢", sz: "920" },
-  ];
-  const sells = [
-    { px: "43¢", sz: "1.1k" },
-    { px: "44¢", sz: "2.0k" },
-    { px: "45¢", sz: "3.2k" },
-  ];
-
-  return (
-    <Frame label="Prices">
-      <div className="landing-illus-orderbook">
-        <div className="landing-illus-ob-col">
-          <span className="landing-illus-ob-head landing-illus-ob-bid">Buyers</span>
-          {buys.map((row) => (
-            <div key={row.px} className="landing-illus-ob-row">
-              <span className="text-success">{row.px}</span>
-              <span>{row.sz}</span>
-            </div>
-          ))}
-        </div>
-        <div className="landing-illus-ob-spread">
-          <span className="landing-illus-ob-spread-label">Gap</span>
-          <span className="landing-illus-ob-spread-val">2¢</span>
-        </div>
-        <div className="landing-illus-ob-col">
-          <span className="landing-illus-ob-head landing-illus-ob-ask">Sellers</span>
-          {sells.map((row) => (
-            <div key={row.px} className="landing-illus-ob-row">
-              <span className="text-destructive">{row.px}</span>
-              <span>{row.sz}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Frame>
-  );
-}
-
-/** Pool deposit mock. */
+/**
+ * Diagram of the LP vault: deposit, earn a share of the fee, withdraw.
+ *
+ * The figures are gone. This showed "Pool size $1.24M" and "+4.2% this month"
+ * — invented numbers, on the pitch deck, for a vault whose real TVL is on
+ * /vault and is a great deal smaller. The real number belongs there, not here.
+ */
 export function LandingVaultIllustration() {
   const fillId = useId();
 
@@ -168,8 +139,8 @@ export function LandingVaultIllustration() {
       <div className="landing-illus-vault">
         <div className="landing-illus-vault-stat">
           <span className="landing-illus-vault-label">Pool size</span>
-          <span className="landing-illus-vault-value">$1.24M</span>
-          <span className="landing-illus-vault-sub text-success">+4.2% this month</span>
+          <span className="landing-illus-vault-value">FXRP</span>
+          <span className="landing-illus-vault-sub">grows with trading fees</span>
         </div>
         <svg viewBox="0 0 432 100" className="landing-illus-vault-chart" aria-hidden>
           <defs>
@@ -190,7 +161,7 @@ export function LandingVaultIllustration() {
           />
         </svg>
         <div className="landing-illus-vault-actions">
-          <span className="landing-illus-vault-btn landing-illus-vault-btn--primary">Deposit USDC</span>
+          <span className="landing-illus-vault-btn landing-illus-vault-btn--primary">Deposit FXRP</span>
           <span className="landing-illus-vault-btn">Withdraw</span>
         </div>
       </div>
@@ -198,41 +169,4 @@ export function LandingVaultIllustration() {
   );
 }
 
-/** Helper app mock. */
-export function LandingKeeperIllustration() {
-  const tasks = [
-    { name: "Expired trades", status: "ok", detail: "3 markets closed" },
-    { name: "Waiting orders", status: "ok", detail: "12 orders matched" },
-    { name: "Risk check", status: "idle", detail: "Watching 847 trades" },
-  ];
 
-  return (
-    <Frame label="Helper app">
-      <div className="landing-illus-keeper">
-        <div className="landing-illus-keeper-header">
-          <span className="landing-illus-keeper-dot landing-illus-keeper-dot--live" />
-          <span>LeverX helper · running</span>
-        </div>
-        <ul className="landing-illus-keeper-list">
-          {tasks.map((task) => (
-            <li key={task.name} className="landing-illus-keeper-row">
-              <span className="landing-illus-keeper-name">{task.name}</span>
-              <span className="landing-illus-keeper-detail">{task.detail}</span>
-              <span
-                className={cn(
-                  "landing-illus-keeper-badge",
-                  task.status === "ok" && "landing-illus-keeper-badge--ok",
-                )}
-              >
-                {task.status === "ok" ? "Done" : "Active"}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className="landing-illus-keeper-code">
-          <span>Setup takes a few minutes</span>
-        </div>
-      </div>
-    </Frame>
-  );
-}

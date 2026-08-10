@@ -1,11 +1,11 @@
 {
-  "collateralReservationId": "47147460",
-  "xrplTxHash": "F3D6EB06A24221ACEF64D41562D8AAFC93A26787627FEE90B2D84FC9C90F543C",
-  "attestationRequestTx": "0x734fd54b6c345af29973195feb84357a4c6b8f7b7913cfd75b951827f9fe8ee8",
-  "votingRoundId": 1418448,
-  "executeMintingTx": "0x8e791d1a4317a584a5c268bf36831eab173bbc0f19bd94d8b89c2ecb49d02593",
+  "collateralReservationId": "47907584",
+  "xrplTxHash": "2B9057D3DD87080DA4FAE0E4991DA3C68CD97426170231A2434E8453CE0ED177",
+  "attestationRequestTx": "0x38ec9f1980ac39597b02374de56648bca7b18994f618037510deb8af90229095",
+  "votingRoundId": 1421787,
+  "executeMintingTx": "0x9705e10041b1960cdd8d33a4f934248170b49bafd01db32c42d5b7fdeee820da",
   "fxrp": "0x0b6A3645c240605887a5532109323A3E12273dc7",
   "minter": "0xBDAAda2753e52e3c35A63bB0aB82fE8922f5C1e1",
-  "balance": "10000000",
-  "mintedAt": "2026-08-07T08:15:01.377Z"
+  "balance": "10004000",
+  "mintedAt": "2026-08-10T19:43:33.873Z"
 }

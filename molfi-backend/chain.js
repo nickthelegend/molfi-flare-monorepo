@@ -2,8 +2,9 @@
  * Molfi backend on-chain layer — **Flare Coston2** (viem).
  *
  * Read-only: a public client reads MolfiMarket / PredictEscrow / FXRP and the
- * FTSOv2 price feeds. There are NO write paths here — the backend never
- * broadcasts a transaction (the app's own wallet sends the real on-chain bets).
+ * FTSOv2 price feeds. There are NO write paths in THIS module — the app's own
+ * wallet sends the real on-chain bets. Background keepers that do sign live in
+ * market-keeper.js and web2json.js.
  *
  * The Flare port replaces Chainlink with FTSOv2. Two consequences worth
  * knowing, both learned from the live network:
@@ -334,6 +335,70 @@ export async function readEscrowLogsViaExplorer(fromBlock = 0) {
 
   // A silent cap would read as "fully backfilled" when it is not.
   return { rows, pages, truncated };
+}
+
+/**
+ * Settlement prices, keyed by market id, from MolfiMarket's `Resolved` event.
+ *
+ * The market struct does not store the price it settled against — only the
+ * winning outcome — so a resolved market rendered "Settles at —", which reads
+ * as broken data rather than as a settled market. The price is in the event,
+ * so read it from there.
+ *
+ * Uses the explorer for the same reason the escrow indexer does: Coston2's RPC
+ * caps `eth_getLogs` at 30 blocks, which cannot reach a market that settled an
+ * hour ago.
+ */
+const RESOLVED_EVENT = [
+  {
+    type: "event",
+    name: "Resolved",
+    inputs: [
+      { name: "id", type: "bytes32", indexed: true },
+      { name: "winningOutcome", type: "uint32", indexed: false },
+      { name: "price", type: "uint256", indexed: false },
+    ],
+  },
+];
+
+let settleCache = { at: 0, byId: new Map() };
+const SETTLE_TTL_MS = 60_000;
+
+export async function settlePrices() {
+  if (Date.now() - settleCache.at < SETTLE_TTL_MS) return settleCache.byId;
+
+  const address = getAddress(CONTRACTS.market);
+  const byId = new Map();
+  let url = `${EXPLORER_API}/addresses/${address}/logs`;
+  let pages = 0;
+
+  while (url && pages < EXPLORER_MAX_PAGES) {
+    pages += 1;
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`explorer ${res.status} on ${url}`);
+    const body = await res.json();
+    for (const item of body.items ?? []) {
+      let decoded;
+      try {
+        decoded = decodeEventLog({ abi: RESOLVED_EVENT, topics: item.topics, data: item.data });
+      } catch {
+        continue;
+      }
+      if (decoded.eventName !== "Resolved") continue;
+      // `emit Resolved(id, outcome, 0)` is the manual-resolve path, which has
+      // no oracle price. Zero means "unknown", not "settled at zero".
+      const price = Number(decoded.args.price) / 1e18;
+      if (price > 0 && !byId.has(decoded.args.id)) byId.set(decoded.args.id, price);
+    }
+    if (!body.next_page_params) break;
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(body.next_page_params).map(([k, v]) => [k, String(v)])),
+    ).toString();
+    url = `${EXPLORER_API}/addresses/${address}/logs?${qs}`;
+  }
+
+  settleCache = { at: Date.now(), byId };
+  return byId;
 }
 
 export const FXRP_ABI = [

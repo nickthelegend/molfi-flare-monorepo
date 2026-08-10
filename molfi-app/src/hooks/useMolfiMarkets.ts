@@ -28,7 +28,10 @@ export function useMolfiMarkets(args: {
     markets,
     loading: cat.comingSoon ? false : onchain.loading,
     comingSoon: cat.comingSoon === true,
-    offline: false,
+    // Propagate the real outage flag — this was hardcoded false, so the grid
+    // could never tell "no markets" from "chain unreachable".
+    offline: cat.comingSoon ? false : onchain.offline,
+    errorMessage: onchain.errorMessage,
     catalogReady: true,
   };
 }
