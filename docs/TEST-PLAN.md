@@ -466,3 +466,37 @@ harness, not a shipped path.
    Two round trips instead of three. Deploying regenerates tee-node's identity,
    requiring re-registration and re-attestation by Flare's data providers on
    their schedule. Runbook in the README.
+
+---
+
+# SECTION K — items added after the plan was first written
+
+The plan above predates `MolfiLpVault` and the 404-vs-503 fix. Phase 1 says the
+checklist must cover every contract and flow the project has, so these are the
+missing rows, with the same explicit definition of correct.
+
+## K. LP vault (contract `0x5F03D67518E1a43b1ED6CC65d736d733AC5a0E23`)
+
+| # | Item | Expected (definition of correct) |
+|---|---|---|
+| K1 | Vault contract deployed | `getBytecode` at the address returns non-empty code on Coston2. |
+| K2 | `GET /api/vaults` | 200. `tvl`, `totalShares`, `sharePrice`, `feesEarned` all numeric and read from the contract. `address` names the vault. **`simulated` MUST be absent.** |
+| K3 | `GET /api/vaults/position/:addr` | 200 with numeric `shares`/`deposited`/`sharePct`/`earned`, read from the contract — never a Mongo sum. |
+| K4 | `GET /api/vaults/position/<malformed>` | **400**, not a zero position. |
+| K5 | Vault unreadable (RPC down) | **503** naming the failure — never invented zeros. |
+| K6 | `deposit(amount)` on-chain | FXRP leaves the wallet, shares are minted at the current price, `totalAssets` rises by exactly the deposit. |
+| K7 | `withdraw` / `withdrawAll` | Burns shares, returns FXRP; a wallet that deposited and immediately withdrew ends with **exactly** its starting balance. |
+| K8 | `collectFees` | Raises `sharePrice` and every holder's `assetsOf` **without minting a share**. |
+| K9 | Deposit after fees accrue | A later depositor gets fewer shares for the same FXRP and is worth exactly what they put in — cannot buy into fees they did not earn. |
+| K10 | Vault UI — no shares held | NAV/share shows `—` and "set by the first deposit"; **no yield percentage is shown to a vault nobody holds.** |
+| K11 | Vault UI — Withdraw control | Rendered only when the wallet holds shares; burns them and the balance returns. |
+| K12 | Fee display precision | A real 0.001 FXRP fee renders as `0.001`, never rounded to `0`. |
+
+## L. Chain-failure semantics
+
+| # | Item | Expected |
+|---|---|---|
+| L1 | `GET /api/onchain/markets/<live id>` | 200 with full detail. |
+| L2 | `GET /api/onchain/markets/<unknown id>` | **404** "not found". |
+| L3 | Same endpoint, chain unreachable | **503** "could not reach Coston2" — a rate-limited RPC must never be reported as a missing market. |
+| L4 | Market list authority | The chain decides which markets exist. A seeded `onchainMarkets` document must **not** add a market the chain does not list. |

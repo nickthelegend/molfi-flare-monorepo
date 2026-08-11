@@ -437,3 +437,87 @@ export async function ensureConfidentialRoot(marketId, tier, root, log = console
 }
 
 export const publicClient = pub;
+
+// ── Fee sweep: escrow → fee recipient → LP vault ─────────────────────────────
+
+const LP_VAULT = process.env.MOLFI_LP_VAULT || "0x5F03D67518E1a43b1ED6CC65d736d733AC5a0E23";
+
+const LP_VAULT_ABI = [
+  { type: "function", name: "collectFees", stateMutability: "nonpayable", inputs: [{ type: "uint256" }], outputs: [] },
+  { type: "function", name: "totalShares", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "lifetimeFees", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+];
+
+/**
+ * Forward collected trading fees into the LP vault.
+ *
+ * `PredictEscrow.vault` is **immutable** and was constructed pointing at the
+ * deployer, so every 2% fee lands in that wallet rather than in the vault the UI
+ * says earns it. Redeploying the escrow to re-point it would strand every open
+ * position and the whole settled history, which is a far worse trade than a
+ * sweep — so the fee recipient forwards instead.
+ *
+ * `collectFees` mints nothing, so the whole amount raises `sharePrice` and every
+ * holder's `assetsOf` pro rata. That is what makes the vault's "earns a share of
+ * the 2% trading fee" true rather than aspirational.
+ *
+ * IT WAITS FOR LPs, DELIBERATELY. `deposit` mints 1:1 when `totalShares == 0`,
+ * ignoring assets already sitting in the vault — so fees swept into an empty
+ * vault would be captured, free, by whoever deposited first. Holding them at the
+ * recipient until there is someone to pay is the honest ordering.
+ *
+ * IT KEEPS A WORKING FLOAT, AND THAT IS NOT OPTIONAL. Fees and market-making
+ * capital are the same FXRP in the same EOA — nothing on-chain distinguishes
+ * them. The first version of this swept `balanceOf(keeper)` outright and moved
+ * the keeper's entire float into the vault, leaving it unable to seed a single
+ * market. Only the balance ABOVE the float is fee income by any honest reading.
+ *
+ * @param minFxrp don't pay gas to move dust.
+ * @param floatFxrp working capital the keeper must retain to keep seeding.
+ */
+export async function sweepFeesToVault({
+  minFxrp = 0.01,
+  floatFxrp = Number(process.env.MOLFI_KEEPER_FLOAT ?? 2),
+  log = console.log,
+} = {}) {
+  if (!wallet) return { swept: 0, skipped: "MOLFI_KEEPER_KEY not configured" };
+  const vault = getAddress(LP_VAULT);
+
+  const shares = await pub.readContract({
+    address: vault, abi: LP_VAULT_ABI, functionName: "totalShares",
+  });
+  if (shares === 0n) return { swept: 0, skipped: "vault has no shares yet — nobody to pay" };
+
+  const balance = await pub.readContract({
+    address: getAddress(FXRP_TOKEN), abi: ERC20_ABI, functionName: "balanceOf",
+    args: [keeper.address],
+  });
+  const float = parseUnits(String(floatFxrp), 6);
+  if (balance <= float) {
+    return {
+      swept: 0,
+      skipped: `balance ${formatUnits(balance, 6)} FXRP is at or below the ${floatFxrp} FXRP working float`,
+    };
+  }
+  const amount = balance - float;
+  if (amount < parseUnits(String(minFxrp), 6)) {
+    return { swept: 0, skipped: `only ${formatUnits(amount, 6)} FXRP above the float` };
+  }
+
+  const allowance = await pub.readContract({
+    address: getAddress(FXRP_TOKEN), abi: ERC20_ABI, functionName: "allowance",
+    args: [keeper.address, vault],
+  });
+  if (allowance < amount) {
+    await send({
+      address: getAddress(FXRP_TOKEN), abi: ERC20_ABI, functionName: "approve",
+      args: [vault, amount * 100n],
+    });
+  }
+
+  const hash = await send({
+    address: vault, abi: LP_VAULT_ABI, functionName: "collectFees", args: [amount],
+  });
+  log(`[molfi-backend] swept ${formatUnits(amount, 6)} FXRP of fees into the LP vault · ${hash}`);
+  return { swept: Number(formatUnits(amount, 6)), hash };
+}

@@ -1037,10 +1037,15 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
           totalShares: r6(lp.totalShares),
           sharePrice: Math.round(lp.sharePrice * 1e4) / 1e4,
           feesEarned: r6(lp.lifetimeFees),
-          apr:
-            lp.tvl > lp.lifetimeFees && lp.lifetimeFees > 0
-              ? Math.round((lp.lifetimeFees / (lp.tvl - lp.lifetimeFees)) * 1000) / 10
-              : 0,
+          // Yield is NAV growth, which is what a share price means.
+          //
+          // This used to be `fees / (tvl - fees)`, which assumes TVL is
+          // principal plus every fee ever earned. One withdrawal breaks that:
+          // after LPs took money out, cumulative `lifetimeFees` exceeded current
+          // TVL, the guard went false, and the page showed "0% yield" directly
+          // beside "0.66 FXRP fees earned". `sharePrice` is unit-priced and
+          // survives deposits and withdrawals by construction.
+          apr: Math.round((lp.sharePrice - 1) * 1000) / 10,
           escrowTvl: r6(escrowTvl),
           feesGenerated,
           depositors: lpCount,

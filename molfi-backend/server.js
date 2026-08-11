@@ -264,6 +264,14 @@ async function main() {
       // Nudge the read path so the new market shows up without waiting a poll.
       await OnchainMarkets.deleteMany({ _id: { $in: created.map((c) => c.id) } }).catch(() => {});
     }
+    // Forward collected fees to the LP vault, so the vault page's "earns a
+    // share of the 2% trading fee" is a fact rather than a plan. No-ops until
+    // the vault has shares — see sweepFeesToVault.
+    await marketKeeper
+      .sweepFeesToVault({})
+      .then((r) => { if (r.hash) console.log(`[molfi-backend] fee sweep ${r.swept} FXRP`); })
+      .catch((e) => console.warn(`[molfi-backend] fee sweep: ${e.message.split("\n")[0]}`));
+
     const ids = await chain.listMarketIds().catch(() => []);
     // Only the recent tail — resolving is idempotent but scanning 58 markets
     // every tick is 58 reads nobody needs.
