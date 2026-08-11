@@ -170,14 +170,24 @@ test("GET /api/onchain/markets returns [] when no indexed/on-chain markets", asy
   assert.ok(Array.isArray(body));
 });
 
-test("GET /api/onchain/markets reads an indexed doc + escrow OI", async () => {
+test("GET /api/onchain/markets: a Mongo doc cannot conjure a market the chain does not have", async () => {
+  // This used to assert the opposite — that an `onchainMarkets` document showed
+  // up in the list. Nothing ever wrote that collection, so the assertion only
+  // ever passed on hand-seeded data; the moment a writer was added, the live
+  // endpoint served ONE market instead of four, because the lookup returned
+  // early on whatever partial set the keeper happened to have created.
+  //
+  // A keeper only knows the markets IT created — never ones created before it
+  // started, or by another admin — so a partial index used as a gate silently
+  // truncates the venue. The chain is the only authority for which markets
+  // exist. An index may cache; it may not decide.
   await h.db.collection("onchainMarkets").insertOne({
     _id: "0xfeed",
     symbol: "BTC",
     question: "on-chain BTC market",
     closeTs: Date.now() + 60 * 60 * 1000,
     cadenceMins: 15,
-    oracle: "chainlink",
+    oracle: "ftso",
     resolved: false,
     createdAt: Date.now(),
     strikeUsd: 60000,
@@ -185,12 +195,15 @@ test("GET /api/onchain/markets reads an indexed doc + escrow OI", async () => {
   await h.db.collection("onchainTrades").insertOne({
     _id: "oi1", kind: "bet", market: "0xfeed", address: "0xabc", outcome: 0, amount: 25, ts: Date.now(),
   });
+
   const { status, body } = await h.get("/api/onchain/markets");
   assert.equal(status, 200);
-  const m = body.find((x) => x.marketId === "0xfeed");
-  assert.ok(m, "indexed on-chain market present");
-  assert.equal(m.oi, 25);
-  assert.equal(m.bets, 1);
+  assert.ok(Array.isArray(body));
+  assert.equal(
+    body.find((x) => x.marketId === "0xfeed"),
+    undefined,
+    "the mock chain lists no markets, so the seeded document must not appear",
+  );
 });
 
 test("GET /api/onchain/positions/:address reads escrow directly, not an index", async () => {

@@ -100,7 +100,7 @@ payout 0.0588 FXRP (expected 0.0588)   ← pot minus the 2% fee
 
 ```bash
 # 1. contracts
-cd molfi-contracts && npm i && npx hardhat test          # 143/143
+cd molfi-contracts && npm i && npx hardhat test          # 152/152
 npx hardhat run scripts/check-flare.ts --network coston2 # read-only preflight
 
 # 2. backend  (needs MongoDB; see molfi-backend/.env.example)
@@ -118,12 +118,12 @@ needed to try the app.
 
 | Package | Command | Result |
 |---|---|---|
-| `molfi-contracts` | `npx hardhat test` | **143/143** |
+| `molfi-contracts` | `npx hardhat test` | **152/152** |
 | `molfi-predict-sdk` | `npm test` | **15/15** |
 | `molfi-mcp` | `npm test` | **12/12** |
 | `molfi-mcp` | `npm run selftest` | live on Coston2 — reads + a real bet |
 | `molfi-fcc` | `npm test` | **18/18** — the enclave's seal/open, cross-checked against the browser sealer |
-| `molfi-backend` | `npm test` | **30/30** |
+| `molfi-backend` | `npm test` | **33/33** |
 | `molfi-app` | `npx vitest run` | **35/35** (4 skipped: live-network e2e) |
 | live e2e | `npx hardhat run scripts/e2e-live.ts --network coston2` | passing on Coston2 |
 

@@ -343,21 +343,24 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
     try {
       const closed = req.query.status === "closed";
       const cacheKey = closed ? "closed" : "open";
-      const filter = closed ? { resolved: true } : { resolved: false, closeTs: { $gt: Date.now() } };
-      const live = await OnchainMarkets.find(filter)
-        .sort(closed ? { resolvedAt: -1 } : { closeTs: 1 })
-        .limit(20)
-        .toArray();
-      if (live.length) {
-        const out = await Promise.all(live.map(enrichOnChainDoc));
-        return res.json(out);
-      }
-      // Read MolfiMarket on-chain directly (Coston2, read-only).
+
+      // THE CHAIN IS THE ONLY AUTHORITY FOR WHICH MARKETS EXIST.
       //
-      // This serves BOTH tabs. It used to short-circuit `closed` to [] on the
-      // assumption that the Mongo index above would cover settled markets — but
-      // nothing in this repo writes `onchainMarkets`, so the Settled tab was
-      // permanently empty however many markets had actually resolved.
+      // There used to be a Mongo `onchainMarkets` lookup here that returned
+      // early whenever it found anything. Nothing ever wrote that collection,
+      // so in practice it was always empty and always fell through — and when
+      // the writer was finally added, the endpoint immediately started serving
+      // ONE market instead of four. That is not a bug in the writer: a keeper
+      // only knows about markets IT created, never ones created before it
+      // started or by another admin, so a partial index used as a gate silently
+      // hides real markets. An index can be a cache, but it cannot be the
+      // authority, and the difference is invisible until it truncates the venue.
+      //
+      // The chain read below is one Multicall3 round trip and is cached for
+      // 30s, so the index bought little and risked the whole list.
+      //
+      // This serves BOTH tabs. It used to short-circuit `closed` to [], which
+      // left the Settled tab permanently empty however many markets resolved.
       //
       // Every market is read in PARALLEL, and the client batches those reads
       // through Multicall3 (see chain.js), so this is one RPC round trip rather
