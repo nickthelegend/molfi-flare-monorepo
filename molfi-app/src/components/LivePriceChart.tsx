@@ -30,7 +30,15 @@ export function LivePriceChart({
     if (!el || points.length === 0) return;
 
     const chart = createChart(el, {
+      // `autoSize` alone was not enough. When this mounts the container has no
+      // width yet (route transition), the library's observer takes the initial
+      // 0 and the canvases stay at the HTML default 300×150 — then get stretched
+      // over a ~438×236 box, which is why the price series drew compressed into
+      // the right third of an apparently empty chart. Seed the real size and
+      // drive resizes ourselves so it is correct no matter when width arrives.
       autoSize: true,
+      width: el.clientWidth || undefined,
+      height: el.clientHeight || height,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#9a9a97",
@@ -117,8 +125,22 @@ export function LivePriceChart({
     }
 
     chart.timeScale().fitContent();
-    return () => chart.remove();
-  }, [points, strike]);
+
+    const ro = new ResizeObserver(([entry]) => {
+      const w = Math.floor(entry.contentRect.width);
+      const h = Math.floor(entry.contentRect.height) || height;
+      if (w > 0) {
+        chart.resize(w, h);
+        chart.timeScale().fitContent();
+      }
+    });
+    ro.observe(el);
+
+    return () => {
+      ro.disconnect();
+      chart.remove();
+    };
+  }, [points, strike, height]);
 
   return <div ref={ref} style={{ height }} className="w-full" />;
 }

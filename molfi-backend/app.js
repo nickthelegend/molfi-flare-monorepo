@@ -1107,10 +1107,27 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
       return res.status(400).json({ error: "address must be a 20-byte hex address" });
     }
     try {
-      const [pos, state] = await Promise.all([
+      const [pos, state, basis] = await Promise.all([
         chain.lpVaultPosition(address),
         chain.lpVaultState(),
+        VaultDeposits.aggregate([
+          { $match: { address: { $regex: `^${address}$`, $options: "i" } } },
+          { $group: { _id: null, principal: { $sum: "$amount" } } },
+        ]).toArray(),
       ]);
+      /**
+       * Earnings need a cost basis, not NAV drift.
+       *
+       * This was `assets - shares`, on the premise that shares mint 1:1 with
+       * FXRP — true only for the FIRST depositor. Everyone after mints at the
+       * current NAV, so the difference is just how far the share price has
+       * moved since inception. With NAV at 1.5 a wallet that deposited 0.6 FXRP
+       * ten seconds ago was told it had already earned 0.2, when its 0.4 shares
+       * are worth exactly the 0.6 it put in. Use what this address actually
+       * deposited; when we have no record of that, say `null` rather than
+       * invent a number — the UI hides the row.
+       */
+      const principal = basis[0]?.principal ?? null;
       res.json({
         shares: r6(pos.shares),
         // What the shares are worth right now.
@@ -1119,9 +1136,7 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
           state.totalShares > 0
             ? Math.round((pos.shares / state.totalShares) * 1000) / 10
             : 0,
-        // Shares are minted 1:1 with FXRP at parity, so anything above the
-        // share count is fee accrual this holder has earned.
-        earned: r6(Math.max(0, pos.assets - pos.shares)),
+        earned: principal == null ? null : r6(Math.max(0, pos.assets - principal)),
       });
     } catch (e) {
       // Never invent a position — say the read failed.

@@ -63,6 +63,7 @@ import {
 import { MarketCommentsPanel } from "@/components/leverx/comments/MarketCommentsPanel";
 import { useMarketComments } from "@/hooks/useMarketComments";
 import { showError, showTxSuccess, showTxError } from "@/lib/toast";
+import { formatTxError } from "@/lib/leverx/tx-errors";
 import {
   pageSimple,
   tradeStatItem,
@@ -92,6 +93,10 @@ import { cn } from "@/lib/utils";
  * below instead of the trading terminal.
  */
 const HEX64 = /^(0x)?[0-9a-fA-F]{64}$/;
+
+/** `PredictEscrow.FEE_BPS` = 200. Every payout estimate on this page nets it
+ *  off, so the ticket, the position table and the contract agree. */
+const FEE_RATE = 0.02;
 
 function BackLink() {
   return (
@@ -609,9 +614,16 @@ function OnChainPositionsPanel({
   const yes = pos?.yes ?? 0;
   const no = pos?.no ?? 0;
   const total = (pools?.yes ?? 0) + (pools?.no ?? 0);
+  /**
+   * Est. payout for an existing position — NET of the 2% fee, like the contract.
+   *
+   * This returned the gross pro-rata share, so the position table promised 0.08
+   * FXRP where `PredictEscrow.redeem` pays 0.0735 and the ticket's own estimate
+   * two panels up already said "net of the 2% fee". Same trade, two numbers.
+   */
   const estPayout = (outcome: number, stake: number) => {
     const sidePool = outcome === OUTCOME.NO ? pools?.no ?? 0 : pools?.yes ?? 0;
-    return sidePool > 0 ? (stake * total) / sidePool : stake;
+    return sidePool > 0 ? (stake * total * (1 - FEE_RATE)) / sidePool : stake;
   };
 
   // Derived from the escrow read above rather than from an endpoint.
@@ -941,6 +953,24 @@ function OnChainDetail({ id }: { id: string }) {
     refetchInterval: 30_000,
   });
 
+  /**
+   * The Private ticket needs the same balance guard the Standard one has.
+   *
+   * Without it the tab happily committed a 1 FXRP note from a 0.83 FXRP wallet:
+   * `commitBatch` reached the contract, the inner `transferFrom` reverted with
+   * no reason string, and the user got viem's raw dump — ABI signature, every
+   * Groth16 limb, a docs link — for what is simply "you don't have the funds".
+   * The lowest tier is 1 FXRP, so this is the common case, not an edge one.
+   */
+  const confBalanceError = (() => {
+    if (confPlan.error || balance == null) return null;
+    const amt = Number(confAmount);
+    if (!Number.isFinite(amt) || amt <= 0 || amt <= balance) return null;
+    return balance === 0
+      ? "You have no FXRP yet — get some from the faucet in the header."
+      : `You have ${balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} FXRP — the smallest private note is ${CONF_TIERS_FXRP[0]} FXRP.`;
+  })();
+
   const confPoolError = (() => {
     const rows = confPoolQuery.data;
     if (!rows?.length) return null;
@@ -974,6 +1004,7 @@ function OnChainDetail({ id }: { id: string }) {
    *  be claimed here, at this size. */
   const handleConfidentialBet = async () => {
     if (!address) return void connect();
+    if (confBalanceError) return showError(confBalanceError);
     if (confPoolError) return showError(confPoolError);
     setConfBusy("commit");
     try {
@@ -1006,10 +1037,12 @@ function OnChainDetail({ id }: { id: string }) {
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Confidential bet failed";
+      // Anything not matched here still has to go through formatTxError — the
+      // bare `msg` fallback was rendering viem's whole dump in the toast.
       showError(
         /balance|insufficient/i.test(msg)
           ? `Need ${confAmount} FXRP — use the faucet first.`
-          : msg,
+          : formatTxError(e),
       );
     } finally {
       setConfBusy(null);
@@ -1061,7 +1094,7 @@ function OnChainDetail({ id }: { id: string }) {
               ? "This market hasn't resolved yet."
               : /#6/.test(msg)
                 ? "The ZK proof was rejected — this note doesn't back the winning side."
-                : msg;
+                : formatTxError(e);
       showError(friendly);
     } finally {
       setConfBusy(null);
@@ -1163,7 +1196,7 @@ function OnChainDetail({ id }: { id: string }) {
   const poolNo = poolsQuery.data?.no ?? 0;
   const sidePool = (side === OUTCOME.YES ? poolYes : poolNo) + amt;
   const totalPool = poolYes + poolNo + amt;
-  const payout = sidePool > 0 ? (amt * totalPool * 0.98) / sidePool : 0;
+  const payout = sidePool > 0 ? (amt * totalPool * (1 - FEE_RATE)) / sidePool : 0;
   const posYes = posQuery.data?.yes ?? 0;
   const posNo = posQuery.data?.no ?? 0;
   const winLabel = m.outcome === OUTCOME.YES ? "YES" : "NO";
@@ -1181,7 +1214,9 @@ function OnChainDetail({ id }: { id: string }) {
               <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
                 {/* "ZK" here means the bet's proof is verified on-chain, not
                     that the position is hidden — a normal stake is public. */}
-                ⛓️ On-chain · 🔒 ZK-gated bets · FTSOv2-settled
+                {/* The padlock belonged to the Private tab, not to every market —
+                    a public bet's side is on-chain in the clear. */}
+                ⛓️ On-chain · 🔒 Optional private bets · FTSOv2-settled
               </span>
               <h1 className={tradeTerminalTitle}>{m.question}</h1>
               <Link to="/markets" className={tradeTerminalBack}>
@@ -1371,6 +1406,10 @@ function OnChainDetail({ id }: { id: string }) {
                           the user should see exactly which. */}
                       {confPlan.error ? (
                         <p className="text-[10px] text-destructive">{confPlan.error}</p>
+                      ) : confBalanceError ? (
+                        <p className="text-[10px] leading-snug text-destructive">
+                          {confBalanceError}
+                        </p>
                       ) : confPoolError ? (
                         <p className="text-[10px] leading-snug text-destructive">{confPoolError}</p>
                       ) : (
@@ -1401,6 +1440,7 @@ function OnChainDetail({ id }: { id: string }) {
                       disabled={
                         confBusy === "commit" ||
                         Boolean(confPlan.error) ||
+                        Boolean(address && confBalanceError) ||
                         Boolean(address && confPoolError)
                       }
                       className="w-full gap-1.5"
@@ -1463,8 +1503,20 @@ function OnChainDetail({ id }: { id: string }) {
                       {placing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                       {address ? `Bet on-chain · ${side === OUTCOME.YES ? "YES" : "NO"}` : "Connect wallet"}
                     </Button>
+                    {/*
+                      Do not let this line imply privacy it does not deliver.
+                      It read "🔒 Each bet submits a BN254 Groth16 proof verified
+                      on-chain", next to a padlock, on the PUBLIC ticket. The
+                      proof is real and `betZk` really does verify it and burn a
+                      nullifier — but its public signals bind to no market, side,
+                      amount or sender, so it gates nothing about this bet. The
+                      side is plainly visible on-chain here. Privacy lives on the
+                      Private tab, where the side is committed and later claimed
+                      with an outcome-bound proof. Say which is which.
+                    */}
                     <p className="text-center text-[11px] text-muted-foreground">
-                      🔒 Each bet submits a BN254 Groth16 proof verified on-chain · real FXRP escrow · FTSOv2-settled
+                      Public bet · real FXRP escrow · FTSOv2-settled. Your side is visible on-chain —
+                      use the <span className="text-foreground">Private</span> tab to hide it.
                     </p>
                   </>
                 )}

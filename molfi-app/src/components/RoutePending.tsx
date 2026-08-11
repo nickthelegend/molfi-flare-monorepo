@@ -37,11 +37,16 @@ const MARKET_CATEGORIES = ["All", "Live", "Favorites", "Closed"] as const;
 const SIMPLE_PAGE_HEADERS: Record<string, { title: string; hint?: string }> = {
   "/portfolio": { title: "Portfolio", hint: ui.portfolioHint },
   "/vault": { title: ui.vaultPageTitle, hint: ui.vaultPageHint },
-  "/points": {
-    title: "Points",
-    hint: "Leaderboard ranked by LeverX leveraged trading volume (LVX points = quote notional).",
+  // Both entries below were inherited from the LeverX fork and were wrong on
+  // Molfi: `/points` is a removed feature that now redirects to `/markets`, and
+  // its hint advertised "LVX points" from leveraged volume that does not exist
+  // here; `/guide` flashed the title "How LeverX works" on every cold load of
+  // Molfi's own explainer.
+  "/leaderboard": {
+    title: "Leaderboard",
+    hint: "Ranked by realized PnL, from Bet and Redeem events on PredictEscrow.",
   },
-  "/guide": { title: "How LeverX works" },
+  "/guide": { title: "How Molfi works" },
 };
 
 /** Route-level shimmer body — rendered inside `SiteShell` via layout or leaf outlets. */

@@ -28,6 +28,7 @@ const CHAPTERS = [
   { id: "howto", label: "Place a bet" },
   { id: "privacy", label: "Privacy" },
   { id: "resolution", label: "Settlement" },
+  { id: "flare", label: "What it runs on" },
   { id: "walkthrough", label: "Walkthrough" },
   { id: "faq", label: "FAQ" },
 ] as const;
@@ -248,9 +249,12 @@ export function GuideStorybook() {
             subtitle="Resolved on-chain, claimed by winners"
           >
             <p>
-              When a market closes, its outcome is resolved on-chain. Price markets settle against a
-              price oracle; event markets settle against the real-world result. Winners claim their
-              payout directly from the contract — there&apos;s no middleman holding your funds.
+              When a market closes, its outcome is resolved on-chain. Price markets settle against{" "}
+              <strong>FTSOv2</strong>, Flare&apos;s first-party oracle — produced by the same
+              validator set that secures the chain, so no third-party oracle network sits between a
+              market and its price. Markets that track a public JSON API instead settle through the{" "}
+              <strong>Flare Data Connector</strong>. Winners claim their payout directly from the
+              contract — there&apos;s no middleman holding your funds.
             </p>
             <GuidePanel label="What happens at close">
               <dl className="guide-risk-grid">
@@ -274,9 +278,70 @@ export function GuideStorybook() {
             </GuideCallout>
           </GuideChapter>
 
+          {/*
+            The stack, named.
+            This guide ran to 4,000 words without once saying FXRP, FAssets,
+            enclave or Data Connector — so the whole reason this is a Flare
+            product, rather than a prediction market that happens to be
+            deployed on Flare, existed only in the repo README. Anyone reading
+            the app itself should be able to see what it is built on.
+          */}
+          <GuideChapter
+            id="flare"
+            index="06"
+            title="What it runs on"
+            subtitle="FXRP collateral, first-party oracles, confidential compute"
+          >
+            <p>
+              Molfi is not a prediction market that happens to sit on Flare — each piece of it is a
+              Flare protocol doing something a generic chain could not.
+            </p>
+            <GuidePanel label="The Flare stack">
+              <dl className="guide-risk-grid">
+                <div>
+                  <dt>FXRP collateral (FAssets)</dt>
+                  <dd>
+                    Your stake is FXRP — a 1:1, over-collateralized claim on real XRP held by FAssets
+                    agents and redeemable back to the XRP Ledger. Not a mock token, and not a
+                    stablecoin standing in for XRP. It is what lets an XRP holder take a derivative
+                    position without selling into another asset.
+                  </dd>
+                </div>
+                <div>
+                  <dt>FTSOv2 settlement</dt>
+                  <dd>
+                    Prices come from Flare&apos;s own oracle, secured by the same validator set as
+                    the chain. The price you see quoted is the price settlement uses.
+                  </dd>
+                </div>
+                <div>
+                  <dt>Flare Data Connector</dt>
+                  <dd>
+                    Markets can settle against any public JSON API, attested through FDC and proven
+                    on-chain — so a market is not limited to assets with an FTSO feed.
+                  </dd>
+                </div>
+                <div>
+                  <dt>Confidential Compute</dt>
+                  <dd>
+                    Sealed-bid markets encrypt your side to a registered Flare Confidential Compute
+                    enclave in your browser. The book opens only after close, so the odds cannot be
+                    read and your bet cannot be front-run.
+                  </dd>
+                </div>
+              </dl>
+            </GuidePanel>
+            <GuideCallout variant="tip" title="Testnet, and honest about it">
+              Molfi runs on Coston2 with real deployed contracts and real FXRP. The Confidential
+              Compute image is registered and reached PRODUCTION, but ran with a simulated
+              attestation quote — the routing, signing and on-chain verification are genuine; the
+              hardware root of trust is not yet.
+            </GuideCallout>
+          </GuideChapter>
+
           <GuideChapter
             id="walkthrough"
-            index="06"
+            index="07"
             title="Step by step"
             subtitle="From wallet to winnings"
           >

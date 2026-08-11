@@ -109,7 +109,14 @@ export const publicClient = createPublicClient({
   // that plainly exists. Backing off further and for longer costs nothing when
   // the node is healthy and is the difference between a slow page and a wrong
   // one.
-  transport: http(COSTON2.rpcUrl, { retryCount: 6, retryDelay: 1200, timeout: 30_000 }),
+  //
+  // But the budget has to stay bounded: at `retryCount: 6, retryDelay: 1200`
+  // the exponential backoff alone summed to ~75s, so a genuinely unreachable
+  // node held every read open for over a minute before the endpoint could
+  // answer its 503 — long past the point any browser has given up. Four
+  // retries still absorb a rate-limit blip, and an outage now surfaces in
+  // about ten seconds.
+  transport: http(COSTON2.rpcUrl, { retryCount: 4, retryDelay: 700, timeout: 8_000 }),
   batch: { multicall: { batchSize: 4096, wait: 24 } },
 });
 

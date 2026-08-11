@@ -96,6 +96,28 @@ payout 0.0588 FXRP (expected 0.0588)   ← pot minus the 2% fee
 | [`molfi-circuits`](./molfi-circuits) | Circom BN254 circuits + proving artifacts |
 | [`molfi-fcc`](./molfi-fcc) | **Flare Confidential Compute** — the TypeScript extension that runs *inside* the registered TEE image, plus registration and live-verification scripts |
 
+## Try it — live
+
+| | |
+|---|---|
+| **App** | **https://molfi.fun** |
+| API | https://molfi-backend-b2390041d5b6.herokuapp.com/api/health |
+
+Live on Flare **Coston2** against the deployed contracts below. To place a bet,
+get **C2FLR + FXRP** from https://faucet.flare.network/coston2 — on Coston2 the
+faucet dispenses FXRP directly (100 C2FLR + 10 FXRP per address per 24h), so the
+full FAssets mint flow is not needed to try the app.
+
+Markets roll forward on their own: an unattended keeper opens each slot, seeds
+both sides, and settles from FTSOv2 at close. Nothing on the page is seeded by
+hand at demo time.
+
+**One caveat, stated up front:** sealed-bid markets need the Flare Confidential
+Compute enclave, which is not reachable from the hosted API yet. On
+https://molfi.fun the Sealed tab reports the enclave as unreachable and disables
+itself; **Standard and Private (ZK) bets work fully.** Run the stack locally
+(below) to exercise the sealed book end to end.
+
 ## Run it
 
 ```bash
@@ -110,9 +132,9 @@ cd ../molfi-backend && npm i && node --env-file=.env server.js   # :4100
 cd ../molfi-app && npm i && npm run dev                  # :8090
 ```
 
-Get testnet **C2FLR + FXRP** from https://faucet.flare.network/coston2 — on
-Coston2 the faucet dispenses FXRP directly, so the full FAssets mint flow isn't
-needed to try the app.
+The local stack additionally reaches the Confidential Compute enclave on
+`:6675`, so the sealed-bid path works here even though the hosted API cannot
+reach it yet.
 
 ## Tests
 
@@ -375,6 +397,29 @@ stakes. That was never implemented in code — a full audit found eERC only in t
 dead config fields and marketing copy. This build does not repeat the claim. The
 real confidentiality is the Groth16 hidden-side circuit, described honestly in
 [`SKILL.md`](./molfi-predict-sdk/SKILL.md).
+
+## How the hosted stack is wired
+
+| Piece | Where | Notes |
+|---|---|---|
+| App | Vercel, `molfi.fun` | Vite SPA, `VITE_MOLFI_BACKEND_URL` points at the API |
+| API + keeper | Heroku, one `web` dyno | `Procfile` → `node server.js`, Node 22 |
+| Database | MongoDB Atlas | `MONGODB_DB=molfi_flare` |
+| Chain | Flare Coston2 | contracts below, read via `MOLFI_RPC` |
+
+Two things worth knowing if you redeploy it yourself:
+
+- **The backend reads contract addresses from `molfi-contracts/deployments/`,
+  which is outside its own package.** Deploy the backend subtree on its own and
+  that file is not there — every read fails with *"missing contract address for
+  markets"*. Set `MOLFI_MARKET`, `MOLFI_ESCROW`, `MOLFI_CBET`, `MOLFI_VERIFIER`,
+  `MOLFI_ORACLE`, `MOLFI_LP_VAULT`, `MOLFI_FXRP` (plus `MOLFI_SEALED_BOOK` and
+  `MOLFI_WEB2_ORACLE`) as env vars; every one of them already has an override in
+  `chain.js`.
+- **The keeper needs gas, and it fails quietly at the edges.** With an empty
+  keeper wallet the API still answers `200` and the site still says "markets
+  engine online" — but no new slots open and closed markets never settle, so the
+  venue looks abandoned rather than broken. Keep C2FLR in the keeper address.
 
 ## Honest scope
 

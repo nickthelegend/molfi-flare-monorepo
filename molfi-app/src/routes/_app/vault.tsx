@@ -227,10 +227,19 @@ function VaultPage() {
         */}
         {vault?.totalShares ? (
           <>
+            {/*
+              `feesEarned` is the vault's on-chain `lifetimeFees` — every FXRP
+              ever paid IN, across all generations of LPs. The yield beside it
+              is NAV growth for the CURRENT holders. The two legitimately
+              diverge: a full withdrawal re-prices shares at 1.0 for whoever
+              deposits next, while `lifetimeFees` keeps counting. Say "paid in
+              since inception" so the pair can't be read as one contradicting
+              the other.
+            */}
             <Stat
               label="Realized fee yield"
               value={`${vault?.apr ?? 0}%`}
-              sub={`${usd(vault?.feesEarned ?? 0)} FXRP fees earned`}
+              sub={`${usd(vault?.feesEarned ?? 0)} FXRP paid in since inception`}
               accent
             />
             <Stat
@@ -242,10 +251,19 @@ function VaultPage() {
           </>
         ) : (
           <>
+            {/*
+              Say WHEN this was collected, not just how much.
+              "Fees collected 9.57 FXRP · 2% of every settled bet" sitting beside
+              "Total value locked 0 FXRP" invites exactly one reading: the number
+              is invented. It isn't — it is the vault's on-chain `lifetimeFees`,
+              accumulated across every LP generation since deployment, and the
+              TVL is 0 only because the last LP withdrew. Date the figure so the
+              pair reconciles on sight.
+            */}
             <Stat
-              label="Fees collected"
+              label="Lifetime fees collected"
               value={`${usd(vault?.feesEarned ?? 0)} FXRP`}
-              sub="2% of every settled bet, on-chain"
+              sub="paid in since deployment · TVL is 0 because the last LP withdrew"
               accent
             />
             <Stat label="NAV / share" value="—" sub="set by the first deposit" />
@@ -258,7 +276,7 @@ function VaultPage() {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground">Vault performance · TVL</h2>
           <span className="font-mono text-sm text-[var(--long-text)]">
-            +{usd(vault?.feesEarned ?? 0)} FXRP earned
+            +{usd(vault?.feesEarned ?? 0)} FXRP paid in
           </span>
         </div>
         {tvlPoints.length > 1 ? (
@@ -338,10 +356,14 @@ function VaultPage() {
                 <span className="text-muted-foreground">Pool share</span>
                 <span className="font-mono">{pos.sharePct}%</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Fees earned</span>
-                <span className="font-mono text-[var(--long-text)]">+{usd(pos.earned)} FXRP</span>
-              </div>
+              {pos.earned == null ? null : (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Fees earned</span>
+                  <span className="font-mono text-[var(--long-text)]">
+                    +{usd(pos.earned)} FXRP
+                  </span>
+                </div>
+              )}
               {/*
                 The way out. There was none: the old "deposit" transferred FXRP
                 into PredictEscrow, which has no function that could ever pay it

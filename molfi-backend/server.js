@@ -316,12 +316,23 @@ async function main() {
   }
   const WEB2_REFRESH_SECONDS = Number(process.env.MOLFI_WEB2_REFRESH_SECONDS || 1800);
 
-  await pollPrices();
-  await ensureMarkets();
-  await indexEscrowLogs().catch((e) =>
-    console.warn(`[molfi-backend] escrow indexer: ${e.message}`),
-  );
-  await app.locals.reconcileVault();
+  // Listen BEFORE the first warm-up pass.
+  //
+  // These four awaits all touch Coston2, and viem retries with exponential
+  // backoff — so when the RPC was unreachable or rate-limited at boot the
+  // process sat here for minutes and never bound the port. The whole API was
+  // down rather than degraded, and the endpoints that exist precisely to say
+  // "could not reach Coston2" (503) could not answer at all. Bind first, warm
+  // up in the background, and let each endpoint report its own failure.
+  app.listen(PORT, () => console.log(`[molfi-backend] API on http://localhost:${PORT}`));
+
+  const warn = (what) => (e) => console.warn(`[molfi-backend] ${what}: ${e.message}`);
+  await Promise.allSettled([
+    pollPrices().catch(warn("price poll")),
+    ensureMarkets().catch(warn("market seed")),
+    indexEscrowLogs().catch(warn("escrow indexer")),
+    app.locals.reconcileVault().catch(warn("vault reconcile")),
+  ]);
   setInterval(pollPrices, 10_000);
   setInterval(ensureMarkets, 15_000);
   setInterval(settleDue, 12_000);
@@ -343,8 +354,6 @@ async function main() {
     () => refreshWeb2Feeds().catch((e) => console.warn(`[molfi-backend] web2 keeper: ${e.message}`)),
     300_000,
   );
-
-  app.listen(PORT, () => console.log(`[molfi-backend] API on http://localhost:${PORT}`));
 }
 
 // Only start the server when executed directly — importing this module (e.g.

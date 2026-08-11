@@ -38,7 +38,17 @@ export function useOnChainMarkets(status: "open" | "closed" = "open") {
 
   return {
     markets,
-    loading: query.isLoading,
+    /**
+     * Stop reporting "loading" once an attempt has actually failed.
+     *
+     * `retry: true` above means the query never reaches a terminal error state,
+     * so `isLoading` stayed true forever while the backend was down — the grid
+     * sat on skeleton rows and the `offline` state below was unreachable on a
+     * cold load. The user saw an endless "Loading markets…" for an outage.
+     * After the first failure this flips false, `offline` takes over, and the
+     * retries keep running underneath so the page still heals by itself.
+     */
+    loading: query.isLoading && query.failureCount === 0,
     error: query.isError,
     /**
      * True when we have nothing to show AND the backend is not answering.

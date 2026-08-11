@@ -151,8 +151,11 @@ function JarvisIllustration() {
 }
 
 function PillarsIllustration() {
+  // "Leverage" was a LeverX pillar. Molfi is pari-mutuel and has no leverage,
+  // no margin and no liquidations — the Guide says so twice. Naming it here
+  // pitched a feature the product deliberately does not have.
   const pillars = [
-    { label: "Leverage", h: 72 },
+    { label: "Privacy", h: 72 },
     { label: "UI", h: 58 },
     { label: "Vault", h: 64 },
     { label: "Keepers", h: 50 },

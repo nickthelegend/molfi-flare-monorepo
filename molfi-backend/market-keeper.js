@@ -499,9 +499,21 @@ export async function sweepFeesToVault({
       skipped: `balance ${formatUnits(balance, 6)} FXRP is at or below the ${floatFxrp} FXRP working float`,
     };
   }
-  const amount = balance - float;
+  // Cap what one run can move.
+  //
+  // "Everything above the float" is not a measure of anything the keeper
+  // earned — it is just whatever happens to be sitting in the wallet. A single
+  // FAssets mint into this address had 8.3 FXRP swept straight into the vault
+  // and reported as trading yield, which took NAV/share from 1.0 to 172.7 and
+  // the headline APR to 17,169%. The escrow already pays the real 2% fee to the
+  // vault on-chain at redeem time (PredictEscrow.redeem), so this sweep only
+  // ever handles the keeper's own residual winnings — which arrive in small
+  // amounts. Bound it so an unrelated balance can never be donated wholesale.
+  const cap = parseUnits(String(process.env.MOLFI_KEEPER_SWEEP_MAX ?? 0.5), 6);
+  const available = balance - float;
+  const amount = available > cap ? cap : available;
   if (amount < parseUnits(String(minFxrp), 6)) {
-    return { swept: 0, skipped: `only ${formatUnits(amount, 6)} FXRP above the float` };
+    return { swept: 0, skipped: `only ${formatUnits(available, 6)} FXRP above the float` };
   }
 
   const allowance = await pub.readContract({
@@ -518,6 +530,8 @@ export async function sweepFeesToVault({
   const hash = await send({
     address: vault, abi: LP_VAULT_ABI, functionName: "collectFees", args: [amount],
   });
-  log(`[molfi-backend] swept ${formatUnits(amount, 6)} FXRP of fees into the LP vault · ${hash}`);
+  log(
+    `[molfi-backend] swept ${formatUnits(amount, 6)} FXRP of keeper winnings into the LP vault · ${hash}`,
+  );
   return { swept: Number(formatUnits(amount, 6)), hash };
 }

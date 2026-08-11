@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { assetIconUrl } from "@/lib/asset-icons";
 import { normalizeProtectionBase } from "@/lib/markets";
 import { cn } from "@/lib/utils";
 
 const MONOGRAM_COLORS: Record<string, string> = {
+  FLR: "bg-pink-500/10 text-pink-600 ring-pink-400/25",
   SUI: "bg-accent/12 text-accent ring-accent/25",
   ETH: "bg-violet-500/10 text-violet-600 ring-violet-400/25",
   BTC: "bg-orange-500/10 text-orange-600 ring-orange-400/25",
@@ -33,12 +35,25 @@ export function AssetBadge({
   const src = iconUrl || assetIconUrl(asset);
   const sizeClass = SIZE_CLASS[size];
 
-  if (src) {
+  /**
+   * Fall back to the monogram when the remote icon 404s.
+   *
+   * The monogram below already existed but was unreachable whenever a URL was
+   * present — and the backend hands every market a `cdn.jsdelivr.net/.../<sym>.png`,
+   * which that icon set does not have for FLR. So every FLR market — on Flare's
+   * own token — rendered a broken-image box. Any symbol the CDN lacks now
+   * degrades to the monogram instead.
+   */
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+
+  if (src && !failed) {
     return (
       <img
         src={src}
         alt=""
         role="presentation"
+        onError={() => setFailed(true)}
         className={cn(
           "shrink-0 rounded-full object-cover ring-1 ring-border",
           sizeClass,

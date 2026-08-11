@@ -162,6 +162,77 @@ Run against the live stack (Coston2, real contracts, real FXRP, real enclave,
 persisted MongoDB). Every PASS below means the observed result matched the
 Expected column **and** the console/network were clean for that interaction.
 
+## Latest run — status by section
+
+| Section | Result |
+|---|---|
+| A. Pages (18) | **18/18 PASS** |
+| B. API (33) | **33/33 PASS** |
+| C. On-chain (13) | **13/13 PASS** |
+| D. Integrations (11) | 9 PASS (D1,D2,D3,D4,D5,D6,D7,D8,D9,D11 — D4 SEAL_KEY side only) · **D10 UNTESTABLE** (no `PINATA_JWT`) |
+| E. Flows (9) | E1,E3,E4,E5,E6 PASS · **E2,E7,E8,E9 BLOCKED** (out of C2FLR gas) |
+| F. Edge cases (18) | F1–F12, F15–F18 **PASS** · F13 PASS (via K5/L3) · **F14 BLOCKED** (needs a tx) |
+| K. LP vault (12) | K1–K11 **PASS** · K12 PASS (0.001 FXRP fee rows render as `0.001`) |
+| L. Chain-failure (4) | **4/4 PASS** |
+
+### Blocked, not passed — Coston2 gas
+
+The deployer and test wallets are down to ~0.12 and ~0.32 C2FLR. The FAssets
+mint below consumed the rest (1.67 C2FLR reservation fee plus gas). C2FLR comes
+only from `faucet.flare.network/coston2`, which is human-gated, so these items
+could not be executed and are **not** marked PASS:
+
+| Item | Needs |
+|---|---|
+| E2 | a winning `redeem` transaction |
+| E7 | comment/like/reply writes |
+| E8 | the faucet itself |
+| E9 | keeper gas to create and resolve each slot's markets |
+| F14 | a transaction to interrupt mid-flight |
+
+**The keeper also needs gas to keep creating and settling markets.** Top both
+wallets up from the faucet before demoing.
+
+Eight defects were found and fixed during this run; each is re-verified in the
+browser and noted at its item below:
+
+1. **Private tab had no balance guard.** A 1 FXRP note from a 0.83 FXRP wallet
+   reached `commitBatch`, reverted with no reason string, and rendered viem's
+   raw dump in a toast. Standard and Sealed both had the guard; Private did not.
+2. **Confidential handlers bypassed `formatTxError`.** Both fell through to the
+   bare `Error.message`, so any unmapped revert printed the full viem dump.
+3. **Position payout ignored the 2% fee.** The table promised 0.08 FXRP where
+   `PredictEscrow.redeem` pays 0.0735 — and the ticket two panels up already
+   said "net of the 2% fee". Same trade, two numbers.
+4. **`sweepFeesToVault` swept any balance above the float and called it fees.**
+   A 10 FXRP FAssets mint into the keeper wallet was donated to the vault, which
+   took NAV/share from 1.0 to 172.7 and the headline APR to 17,169%. Now capped
+   per run (`MOLFI_KEEPER_SWEEP_MAX`, default 0.5) and labelled "keeper winnings".
+5. **Markets grid showed a permanent skeleton during a backend outage.** The
+   query retries forever, so `isLoading` never resolved and the `offline` state
+   was unreachable on a cold load — an endless "Loading markets…" for an outage.
+6. **Every FLR icon was a broken image.** The icon CDN has no `flr.png`, and the
+   monogram fallback was unreachable whenever a URL was present. FLR is Flare's
+   own token; it appeared broken on every FLR market row.
+7. **The backend would not start when Coston2 was unreachable.** Four chain-touching
+   `await`s ran before `app.listen`, so with a dead RPC the process sat in warm-up
+   for minutes and never bound the port — the whole API was down rather than
+   degraded, and the very endpoints that exist to answer 503 could not answer at
+   all. It now listens first and warms up in the background. Separately, the read
+   transport's retry budget (`retryCount: 6, retryDelay: 1200`) summed to ~75s of
+   backoff; at `4 / 700` an outage surfaces in ~10s and a rate-limit blip is still
+   absorbed.
+8. **A brand-new LP was shown fees it had not earned.** `earned` was `assets - shares`,
+   which only holds for the first depositor — everyone after mints at the current
+   NAV. A wallet that deposited 0.6 FXRP seconds earlier was told it had earned 0.2.
+   It now measures against what that address actually deposited, and returns `null`
+   (row hidden) when there is no cost basis rather than inventing one.
+
+The vault was reset to NAV/share 1.0000 after defect 4 (withdraw-all, then a
+1 FXRP reseed — the keeper holds 100% of the shares). Its on-chain
+`lifetimeFees` counter still includes that one-off top-up, so the UI now says
+"paid in since inception" rather than implying it is current-holder yield.
+
 ## A. Pages — 18/18 PASS
 
 A1 ✅ · A2 ✅ · A3 ✅ (fixed) · A4 ✅ (fixed) · A5 ✅ · A6 ✅ (`lx-markets-view`
