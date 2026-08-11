@@ -348,3 +348,57 @@ This was real — the book trusted `0x2Ab15c68…` while the enclave signed as
 - `config/proxy/extension_proxy.coston2.docker.toml` does not exist until you
   copy the `.example` and fill in the indexer DB block. Host `34.38.42.208`,
   port 3306, database `indexer`; credentials come from the Flare team.
+
+## Sibling tenants — dorr and hadal inside this machine
+
+`0x0A752D89…` is the expensive part. Flare's data providers reached it,
+requested `tee-attestation`, matched policy against reward epoch 5909 and voted
+it available. That artifact is per-machine, so a sibling product standing up its
+own box gets a server with no such artifact — running *inside* this machine is
+strictly better. Hence tenants, not deployments.
+
+Nothing about registration binds an opType. `post-build.sh` submits a TEE
+version string, the governance signer set and the machine's proxy URL; dispatch
+is `framework.lookup(opType, opCommand)` with a 501 fallback
+(`base/server.ts:133`). `DORR` and `HADAL` are simply more `framework.handle`
+calls.
+
+Sharing one key across products would be worse than not sharing: a quote issued
+for dorr would verify against hadal's contract, and a ciphertext sealed "to the
+enclave" would open for whichever tenant asked first. So each derives its own,
+matching `flare-tee-kit` byte for byte:
+
+    signingKey(p) = HKDF-SHA256(seed, salt = "flare-tee-kit/v1/sign",  info = p)
+    sealingKey(p) = HKDF-SHA256(seed, salt = "flare-tee-kit/v1/ecies", info = p)
+
+Vendored (`extension/src/app/tenants.ts`), not depended on — ~100 lines using
+imports the image already had. Inside a registered enclave a smaller audited
+surface beats dependency hygiene: adding a package means auditing its tree
+inside the trust boundary.
+
+**Molfi is not a tenant.** Its sealing key stays pinned by `ENCLAVE_PRIVATE_KEY`
+and its signer by `TEE_SIGNER_KEY`. Deriving them would move the sealing key
+away from the one live bids were sealed to, and the signer away from what
+`SealedBidBook.teeSigner` points at. `MOLFI/SEAL_KEY`, `MOLFI/OPEN_BOOK` and
+`MOLFI/OPENINGS` are untouched — nothing in the tenant path is reachable from a
+MOLFI action.
+
+Separation is of **identity, not blast radius**: code in this process can derive
+any tenant's key, so a compromise of the enclave compromises all of them. Two
+products that must be safe from each other's *bugs* need two enclaves.
+
+`verify-image.mjs` proves it from inside the container — distinct signers and
+sealing keys, molfi's signer shared with none of them, and every cross-tenant
+open rejected. On a molfi-only image it says so rather than passing vacuously.
+
+**Not deployed.** Landing it rebuilds the image, and the node's identity key is
+regenerated on every container start (see gotcha 3), so it means a new machine,
+`register-tee`, and another availability check on Flare's schedule. Molfi's
+`2` is not lost while that happens — the old machine stays ACTIVE, and molfi's
+off-chain path talks to the extension directly rather than through the
+container — but instructions split between old and new until
+`retire-stale-tee.ts` pauses the old one.
+
+    cd molfi-fcc && npm run sync         # already in sync
+    cd ~/molfi-fce && ./scripts/start-services.sh --chain coston2
+    cd molfi-fcc && npm run verify       # tenant checks stop being vacuous here

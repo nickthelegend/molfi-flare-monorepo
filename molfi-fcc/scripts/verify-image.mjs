@@ -104,6 +104,72 @@ if (!s.enclavePublicKey) {
   else bad("a sealed bid was accepted for the wrong bidder");
 }
 
+// --- 4b. Tenant isolation, proved from inside the container -----------------
+// molfi's machine is attested; dorr and hadal ride inside it rather than on
+// their own unattested boxes. The property that makes that safe rather than
+// merely convenient is negative: a ciphertext sealed to one tenant must be
+// opaque to the other, and a signature made for one must not recover to the
+// other's registered address. Asserting it in a unit test proves the maths;
+// asserting it HERE proves the image actually ships those separate keys.
+if (!Array.isArray(s.tenants) || s.tenants.length === 0) {
+  ok("no sibling tenants in this image — molfi-only build");
+} else {
+  ok(`tenants ${s.tenants.map((t) => `${t.opType}(${t.projectId})`).join(" · ")}`);
+
+  const addrs = new Set(s.tenants.map((t) => String(t.signer).toLowerCase()));
+  const seals = new Set(s.tenants.map((t) => String(t.sealingPublicKey).toLowerCase()));
+  if (addrs.size === s.tenants.length && seals.size === s.tenants.length) {
+    ok("every tenant carries a distinct signer and sealing key");
+  } else {
+    bad("TENANTS SHARE KEY MATERIAL — a quote for one would verify for another");
+  }
+  if (!addrs.has(String(s.teeSigner).toLowerCase())) {
+    ok(`molfi's signer ${s.teeSigner} is not shared with any tenant`);
+  } else {
+    bad("a tenant derived molfi's signer — molfi's key must stay env-pinned");
+  }
+
+  // The decisive one: seal to each tenant out here, then ask the container to
+  // open each ciphertext under BOTH tenants' keys.
+  const cross = inContainer(`
+    const { deriveTenant } = require("/app/extension/dist/app/tenants.js");
+    const { sealSide, openSealed, enclaveKeypair } = require("/app/extension/dist/app/seal.js");
+    const seed = process.env.TENANT_MASTER_SEED
+      ? Buffer.from(process.env.TENANT_MASTER_SEED.replace(/^0x/, ""), "hex") : null;
+    if (!seed) { console.log(JSON.stringify({skipped:"TENANT_MASTER_SEED unset — tenants are ephemeral this boot"})); }
+    else {
+      const ids = ${JSON.stringify(s.tenants.map((t) => t.projectId))};
+      const t = Object.fromEntries(ids.map((id) => [id, deriveTenant(seed, id)]));
+      const key = (x) => "0x" + t[x].sealingPrivateKey.toString("hex");
+      const pub = (x) => enclaveKeypair(key(x)).publicKey;
+      const out = {};
+      for (const owner of ids) {
+        const ct = sealSide(pub(owner), ${JSON.stringify(MKT)}, ${JSON.stringify(ALICE)}, 1);
+        out[owner] = { self: null, others: {} };
+        out[owner].self = openSealed(key(owner), ${JSON.stringify(MKT)}, ${JSON.stringify(ALICE)}, ct);
+        for (const other of ids.filter((x) => x !== owner)) {
+          try { openSealed(key(other), ${JSON.stringify(MKT)}, ${JSON.stringify(ALICE)}, ct); out[owner].others[other] = "OPENED"; }
+          catch { out[owner].others[other] = "rejected"; }
+        }
+      }
+      console.log(JSON.stringify(out));
+    }
+  `);
+  if (cross.skipped) {
+    ok(`tenant cross-open not proved: ${cross.skipped}`);
+  } else {
+    let leaked = null;
+    for (const [owner, r] of Object.entries(cross)) {
+      if (r.self !== 1) leaked = `${owner} could not open its own ciphertext`;
+      for (const [other, verdict] of Object.entries(r.others)) {
+        if (verdict === "OPENED") leaked = `${other} opened ${owner}'s ciphertext`;
+      }
+    }
+    if (leaked) bad(`TENANT LEAK: ${leaked}`);
+    else ok("each tenant opens only its own ciphertext — cross-tenant opens rejected in-enclave");
+  }
+}
+
 // --- 5. The signer the contract will actually accept ------------------------
 if (existsSync(BOOK_DEPLOYMENT)) {
   const d = JSON.parse(readFileSync(BOOK_DEPLOYMENT, "utf8"));

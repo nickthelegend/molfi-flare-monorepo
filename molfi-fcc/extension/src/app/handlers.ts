@@ -36,7 +36,9 @@ import {
   OP_TYPE_MOLFI,
   type MolfiConfig,
 } from "./config.js";
+import { randomBytes } from "node:crypto";
 import { openBook, openDigest } from "./open-book.js";
+import { registerTenants } from "./tenant-handlers.js";
 import { enclaveKeypair, type EnclaveKeypair } from "./seal.js";
 
 // --- Enclave identity --------------------------------------------------------
@@ -50,6 +52,22 @@ let signer = privateKeyToAccount(
   (cfg.teeSignerKey ?? `0x${"11".repeat(32)}`) as Hex,
 );
 let reader: BookReader | null = null;
+
+/**
+ * Sibling tenants (dorr, hadal), populated by `register`.
+ *
+ * Their keys derive from a master seed that is NOT molfi's key — molfi's stays
+ * exactly as pinned above. Generated in-enclave when TENANT_MASTER_SEED is
+ * absent, which carries the same restart caveat as the sealing key: anything
+ * sealed to a tenant before a restart cannot be opened after one.
+ */
+let tenants: ReturnType<typeof registerTenants> = [];
+
+function tenantSeed(): Buffer {
+  return cfg.tenantMasterSeed
+    ? Buffer.from(cfg.tenantMasterSeed.replace(/^0x/, ""), "hex")
+    : randomBytes(32);
+}
 
 /**
  * Computed openings, keyed by market.
@@ -107,6 +125,11 @@ export function register(framework: Framework): void {
   framework.handle(OP_TYPE_MOLFI, OP_COMMAND_OPEN_BOOK, handleOpenBook);
   framework.handle(OP_TYPE_MOLFI, OP_COMMAND_OPENINGS, handleOpenings);
 
+  // Sibling products sharing this attested machine. Registered AFTER molfi and
+  // under their own opTypes, so nothing above can be reached by a DORR or HADAL
+  // action and nothing below can change molfi's keys — see tenant-handlers.ts.
+  tenants = registerTenants(framework, tenantSeed());
+
   // Once per process. The container registers once; test suites construct a
   // Server per case, and repeating the key on every one buries the output.
   if (bannerShown) return;
@@ -153,6 +176,9 @@ export function reportState(): unknown {
     extension: "molfi-sealed-book",
     opType: OP_TYPE_MOLFI,
     commands: [OP_COMMAND_SEAL_KEY, OP_COMMAND_OPEN_BOOK, OP_COMMAND_OPENINGS],
+    // Sibling products hosted in this same attested machine. Each carries its
+    // OWN signer and sealing key; molfi's two fields below are unchanged.
+    tenants,
     enclavePublicKey: enclave.publicKey,
     teeSigner: signer.address,
     book: cfg.book,
