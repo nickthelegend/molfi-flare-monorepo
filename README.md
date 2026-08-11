@@ -181,12 +181,47 @@ Flare's data providers reached the machine at its registered URL, requested
 `tee-attestation`, matched policy consistency against an on-chain reward epoch,
 and obtained the availability proof. The `2` is the network's verdict, not ours.
 
-**Honest caveat, stated up front:** registration ran with `SIMULATED_TEE=true`.
-The registration, routing, signing scheme and on-chain verification are all real
-and reproducible; the hardware root of trust is not. On real hardware the same
-image and the same handler run unchanged — what changes is that the attestation
-quote is signed by the CPU rather than the simulator. We would rather say that
-than let a judge discover it.
+**Honest caveat, stated up front — read this before you weigh the `2`.**
+
+Registration ran with `SIMULATED_TEE=true`. That flag is in
+`~/molfi-fce/.env`, in `molfi-fcc/.env.local`, recorded as `simulatedTee: true`
+in `deployments/coston2.json` — and it **defaults to on** at
+`scripts/post-build.sh:142` (`export SIMULATED_TEE="${SIMULATED_TEE:-true}"`),
+which is exactly the kind of default that ends up shipped without anyone
+deciding to ship it.
+
+So be precise about what the `2` is worth. It proves three things, and they are
+real:
+
+- **Reachability** — Flare's data providers reached this machine at its
+  registered URL and got an answer. A machine nobody can reach stalls at `1`.
+- **Governance** — the signer set and threshold the node signs with were
+  registered and matched; a mismatch fails with `InvalidGovernanceHash`.
+- **Availability** — policy consistency was checked against an on-chain reward
+  epoch (5909) and the availability proof was obtained and voted.
+
+It does **not** prove a hardware measurement. The attestation quote was produced
+by the simulator, not signed by a CPU. Everything downstream of it — the routing,
+the ECIES sealing, the EIP-191 signing scheme, `openMarketFromTee`'s recovery,
+the on-chain reconciliation in `SealedBidBook` — is real and reproducible, and
+runs unchanged on real hardware. What changes on real hardware is who signs the
+quote.
+
+One consequence worth stating rather than implying: with a simulated quote, the
+**confidentiality** of a sealed bid rests on the operator not reading the
+enclave's memory. The **integrity** does not — `SealedBidBook` independently
+knows its own escrow and bid count and rejects any opening that does not
+reconcile, so a dishonest enclave cannot move a bettor's stake to the other side
+regardless of what the quote says.
+
+**If you open the machine's registered URL in a browser you will get
+`404 page not found`. That is not a dead machine.** tee-proxy serves no root
+route; the URL is the API endpoint Flare's data providers POST to, not a page.
+`GET /info` on the same host returns live `teeInfo`, and the `2` above is the
+network's own confirmation that it answered. It is a Cloudflare *quick* tunnel,
+so its hostname lives only as long as the `cloudflared` process — see
+[REGISTRATION.md](molfi-fcc/REGISTRATION.md) for why re-pointing it needs no
+rebuild.
 
 ### What runs inside the registered image
 

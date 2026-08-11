@@ -29,6 +29,63 @@ consistency matched on-chain reward epoch 5909, and the availability proof was
 obtained. A machine that is unreachable stalls at `1` (INITIALIZED) — the `2`
 is the network's verdict, not ours.
 
+## What the `2` proves, and what it does not
+
+`SIMULATED_TEE=true` for this registration. The flag lives in `~/molfi-fce/.env`
+and `molfi-fcc/.env.local`, is recorded as `simulatedTee: true` in
+`deployments/coston2.json`, and **defaults to on** at
+`scripts/post-build.sh:142` — `export SIMULATED_TEE="${SIMULATED_TEE:-true}"`.
+A default that survives to production is worth naming out loud.
+
+| The `2` proves | It does not prove |
+|---|---|
+| **Reachability** — providers reached this machine at its registered URL and got an answer; unreachable stalls at `1` | **A hardware measurement.** The quote came from the simulator, not from a CPU |
+| **Governance** — the signer set and threshold were registered and matched (a mismatch fails `InvalidGovernanceHash`) | |
+| **Availability** — policy consistency checked against reward epoch 5909, availability proof obtained and voted | |
+
+Everything downstream of the quote is real and unchanged on real hardware: the
+routing, the ECIES sealing, the EIP-191 signing scheme, `openMarketFromTee`'s
+recovery, and the reconciliation `SealedBidBook` performs. What changes on real
+hardware is who signs the quote.
+
+The consequence, stated rather than implied: under a simulated quote the
+**confidentiality** of a sealed bid rests on the operator not reading enclave
+memory. The **integrity** does not — the book knows its own escrow and bid count
+and rejects any opening that fails to reconcile, so a dishonest enclave cannot
+move a stake to the other side no matter what the quote says.
+
+## The registered URL is a quick tunnel
+
+`extProxyUrl` is a Cloudflare **quick** tunnel
+(`…trycloudflare.com`), served by a `cloudflared tunnel --url http://localhost:6674`
+process on the operator's machine.
+
+Two things follow, and only one of them is a problem.
+
+**Clicking it looks broken but isn't.** `GET /` returns `404 page not found`
+because tee-proxy serves no root route. `GET /info` returns 200 with live
+`teeInfo` — which is what Flare's providers actually call. The URL is an API
+endpoint, not a landing page, so link `/info` anywhere a human might click.
+
+**The real fragility is the tunnel's lifetime.** A quick tunnel's hostname is
+bound to that `cloudflared` process. If it dies the hostname changes, the
+registered URL goes genuinely dead, and the next availability check fails — the
+machine can drop out of `2`. For anything long-lived, use a named tunnel or a
+reserved domain.
+
+**Updating the URL does NOT require a rebuild.** `post-build.sh` checks that
+ext-proxy is running and then makes three chain calls — allow-version,
+set-governance, register-tee. It builds no image and restarts no container; the
+image build is `start-services.sh`. Since a machine's identity is the tee-node
+key held by the **running container**, re-registering while that container stays
+up points the *same* machine at the new URL. It is only *restarting* the
+container that regenerates the key and mints a new machine.
+
+```bash
+# container keeps running; same machine, new URL, no rebuild
+EXT_PROXY_URL=https://<new-hostname> ~/molfi-fce/scripts/post-build.sh
+```
+
 ## What actually runs inside the registered image
 
 ```
