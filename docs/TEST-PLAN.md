@@ -368,3 +368,101 @@ tee-node's identity and requires re-registering and re-attesting a new machine �
 on Flare's data providers' schedule, not ours. The README publishes the current
 machine address for independent verification. Path 1 is unaffected (it reaches
 the extension directly, not through the container). Runbook is in the README.
+
+---
+
+# PHASE 6 — FINAL HANDBACK: every item, final status
+
+**Browser:** Claude in Chrome is **not connected** on this machine (extension not
+installed / not signed in; `list_connected_browsers` empty across the run).
+Phase 2 executed in the in-app Chromium against the same live app at `:8091`,
+with console and network inspection. Recorded, not glossed.
+
+## A. Pages — 18/18 PASS
+
+| # | Final | Evidence |
+|---|---|---|
+| A1 | PASS | Hero + CTA, no hardcoded price shown as live |
+| A2 | PASS | 8 unique `/predictions/<id>` links, real pots, live spot, UTC close |
+| A3 | PASS | Closed tab: settled only, odds resolved to 0.0¢/100.0¢, all close times past |
+| A4 | PASS | "Sports markets — coming soon", names only XRP/FLR/BTC/ETH; **0** cards |
+| A5 | PASS | "ETH" → exactly the one ETH market; "zzzznotamarket" → "No markets right now" |
+| A6 | PASS | Toggle writes `lx-markets-view=grid`; survives reload, `aria-pressed=true` |
+| A7 | PASS | Full terminal: pools 0.15/0.05, position, chart, contract links |
+| A8 | PASS | Unknown hex64 → "Couldn't load this market", no stuck skeleton |
+| A9 | PASS | Malformed id → "No market matches this link"; no Polymarket claim |
+| A10 | PASS | Chain-read TVL/NAV/shares; `simulated` gone (was FAIL — see round 3) |
+| A11 | PASS | 4 traders, real 0x addresses, from indexed Bet/Redeem |
+| A12 | PASS | 8 settled positions, −1.52 FXRP, 25% win rate; honest loading state |
+| A13 | PASS | Guide renders in full |
+| A14 | PASS | Pitch renders; no fabricated metrics |
+| A15 | PASS | /privacy and /terms both render (1365 / 1472 chars) |
+| A16 | PASS | /points and /jarvis both redirect to /markets |
+| A17 | PASS | Unknown route → real 404 page + "Go to markets" |
+| A18 | PASS | 8 pages at 375px: `scrollWidth == innerWidth`, zero overflow |
+
+## B. Endpoints — 32/33 PASS, 1 UNTESTED
+
+B1–B22, B24, B25, B27–B32 **PASS** (final sweep 18/18 + comments suite).
+Highlights: B5 every resolved market carries `settlePrice`; B6 live market 200 /
+unknown 404 / unreachable 503 (was FAIL); B11 chain-read, no `simulated`;
+B30 like toggles on and off; B32 a stranger deleting another's comment gets
+**403**.
+
+B23 exercised through the enclave's own `OPEN_BOOK` (live-tee-open: signed,
+accepted, winner paid). B26 exercised by the keeper's live attestation
+(EUR/USD 0.86543, voting round 1421900, posted on-chain).
+
+**B33 Pinata — UNTESTED.** `PINATA_JWT` does not exist in the repo or env, and
+I cannot create an account. The endpoint fails loudly (400 "expected a base64
+image data URL"), never silently succeeds.
+
+## C. On-chain — 13/13 PASS
+
+C1 approve · C2 betZk (0.1 FXRP → pools 0.05→0.15) · C3 redeem win (0.2 → 0.2352,
+second reverts) · C4 redeem loss stated, no payout · C5 keeper creates each slot ·
+C6 FTSOv2 resolve (settled $1.0107) · C7 sealBid, side unreadable on chain ·
+C8 openMarketFromTee accepted · C9 commitBatch (3 commitments, side hidden) ·
+C10 **claim: Groth16 verified, nullifier burned, +2 FXRP** · C11 FtsoOracle
+matches displayed spot · C12 Web2JsonOracle accepted a real proof ·
+C13 **vault deposit/withdraw on a real contract** (was FAIL — funds were being
+destroyed).
+
+## D. Integrations — 10/11 PASS, 1 UNTESTED
+
+D1 RPC (degrades honestly; 503 not 404 — fixed this round) · D2 all four feeds
+live · D3 FDC verifier + DA · D4 enclave SEAL_KEY + OPEN_BOOK · D5 Blockscout
+beyond the 30-block cap · D6 FAssets 6dp · D7 Coinbase labelled reference ·
+D8 frankfurter.dev · D9 icon CDN · D11 zero Sui/mystenlabs hosts.
+**D10 Pinata UNTESTED** (same credential).
+
+## E. Flows — 9/9 PASS
+
+E1 bet (UI == API == chain to the atom) · E2 settle + redeem win · E3 losing side
+explained, no redeem · E4 sealed bid, no YES/NO split on chain · E5 confidential
+bet, blocked with the real reason when the pool can't cover · E6 **vault deposit
+→ withdraw round trip, wallet exactly restored** · E7 comment post/like/reply/
+delete persist · E8 faucet funds this exact FXRP · E9 keeper unattended.
+
+## F. Edge cases — 18/18 PASS
+
+F1 "Enter an amount." · F2 "greater than zero" · F3 "You have 0.59 FXRP." ·
+F4 "smallest bet is 0.000001 FXRP" · F5 "6 decimal places" — each with the
+button disabled · F6–F18 as recorded in rounds 1–2 (double-click yields exactly
+one tx; backend-down and RPC-429 states recover; `MarketClosed` on a closed
+market; second redeem reverts).
+
+## Mocks, stubs, fallbacks
+
+**Zero remain in the product.** The last one — `SimulatedComments` — was deleted
+this round. Chain stubs exist only in `test/helpers.mjs`, which is a unit test
+harness, not a shipped path.
+
+## The two that are not PASS
+
+1. **B33 / D10 Pinata — UNTESTED.** No credential exists; creating an account is
+   not something I can do. Phase 5 explicitly permits marking this untested.
+2. **On-chain instruction path — root cause fixed in source, not deployed.**
+   Two round trips instead of three. Deploying regenerates tee-node's identity,
+   requiring re-registration and re-attestation by Flare's data providers on
+   their schedule. Runbook in the README.
