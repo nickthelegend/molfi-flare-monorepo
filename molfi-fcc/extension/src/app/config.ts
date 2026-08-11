@@ -42,16 +42,6 @@ export interface MolfiConfig {
   enclavePrivateKey: string | null;
   /** Signs openings. Distinct from the sealing key so it can rotate freely. */
   teeSignerKey: string | null;
-  /**
-   * Master seed for the sibling tenants (dorr, hadal) — see tenants.ts.
-   *
-   * NOT used for molfi. Molfi's sealing and signing keys stay pinned to
-   * ENCLAVE_PRIVATE_KEY / TEE_SIGNER_KEY above, because deriving them would
-   * change the sealing key every live bid was sealed to and the signer address
-   * `SealedBidBook.teeSigner` points at. Absent, the tenants are derived from a
-   * seed generated in-enclave, with the same restart caveat.
-   */
-  tenantMasterSeed: string | null;
   simulatedTee: boolean;
 }
 
@@ -62,7 +52,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): MolfiConfig {
     book: env.SEALED_BID_BOOK ?? null,
     enclavePrivateKey: env.ENCLAVE_PRIVATE_KEY ?? null,
     teeSignerKey: env.TEE_SIGNER_KEY ?? null,
-    tenantMasterSeed: env.TENANT_MASTER_SEED ?? null,
     simulatedTee: env.SIMULATED_TEE === "true",
   };
 }
