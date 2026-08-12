@@ -176,8 +176,48 @@ The stake is public — it moves through `transferFrom` either way — but the Y
 split genuinely does not exist on-chain until the market closes. Then the enclave
 opens the book and returns a signed aggregate the contract verifies.
 
-**This is not a mock TEE.** The extension is registered with Flare's
-`FlareTeeManager` and reached the network's own availability check:
+### What `PRODUCTION` proves, and what it does not
+
+*This is the paragraph we submit. It is deliberately worded so it cannot be read
+as "hardware-attested enclave", because it isn't one.*
+
+> Molfi's sealed-bid book runs in a Flare Confidential Compute image registered
+> on `FlareTeeManager`, machine `0x0A752D897f7D61Ce0690EEF812027000813467bb`,
+> which reads **status 2 (PRODUCTION)** on Coston2. That status is Flare's
+> verdict rather than our claim: to reach it, Flare's data providers had to
+> reach the machine at its registered URL, request `tee-attestation`, match the
+> registered signer set and threshold against an on-chain reward epoch, and vote
+> an availability proof. A machine nobody can reach stalls at `1`; a governance
+> mismatch reverts with `InvalidGovernanceHash`.
+>
+> **It does not prove a hardware measurement.** Registration ran with
+> `SIMULATED_TEE=true` — a flag that defaults to on at `scripts/post-build.sh:142`
+> — so the attestation quote was produced by dstack's simulator, not signed by an
+> Intel TDX CPU. The registered code hash is a hash of the image we built,
+> attested by software we ran, not a measurement rooted in silicon. Concretely:
+> **the confidentiality of a sealed bid rests on the operator not reading the
+> enclave's memory.** Read status 2 as *reachable, correctly governed, available,
+> running a code hash we declared* — not as *hardware-attested*.
+>
+> What does not depend on the quote is the **integrity of the opening**.
+> `SealedBidBook` independently knows its own escrowed total and bid count and
+> rejects any TEE-signed aggregate that fails to reconcile against them, so a
+> dishonest enclave cannot move a bettor's stake to the other side no matter who
+> signed the quote. The ECIES sealing, the EIP-191 `TEE_ACTION_RESULT` scheme,
+> `openMarketFromTee`'s signer recovery and that on-chain reconciliation are real
+> and run unchanged on production silicon. What changes on real hardware is who
+> signs the quote — nothing else in the path.
+
+**The registered URL is dead.** It decodes to a Cloudflare quick tunnel that now
+returns 404, so the sealed path cannot be exercised against the registered
+machine until the URL is re-pointed. This is fixable without rebuilding the image
+— `MachineManagerFacet.updateTeeMachineSettings` rewrites the URL and never
+touches the code hash — but it demotes the machine `PRODUCTION → PAUSED` until a
+fresh availability proof is voted through `toProduction`. We are not spending the
+`2` on that this close to the deadline.
+
+The extension is registered with Flare's `FlareTeeManager` and reached the
+network's own availability check:
 
 | | |
 |---|---|
