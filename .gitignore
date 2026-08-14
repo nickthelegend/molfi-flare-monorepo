@@ -39,3 +39,7 @@ ignition/deployments/chain-31337/
 
 # Reference projects read during porting — not ours to vendor.
 _references/
+
+# rig runs as a copy inside molfi-app (where viem resolves); demo/rig.mjs is the source
+molfi-app/rig.tmp.mjs
+molfi-app/audit-signer.tmp.mjs

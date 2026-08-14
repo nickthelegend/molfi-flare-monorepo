@@ -1,0 +1,117 @@
+{
+  "voice": "am_michael",
+  "lines": [
+    {
+      "id": "intro",
+      "text": "This is Molfi — XRP-settled prediction markets on Flare. Stake FXRP on where a price lands, and the market settles against Flare's own oracle."
+    },
+    {
+      "id": "markets",
+      "text": "Markets roll forward on their own. A keeper opens each slot, seeds both sides, and settles at close. Every question, strike and countdown here is read live from Coston2."
+    },
+    {
+      "id": "market-open",
+      "text": "Inside a market: the live spot price, the strike it settles against, the current YES odds, and the oracle doing the settling — FTSOv2, produced by the same validator set that secures the chain."
+    },
+    {
+      "id": "pool-depth",
+      "text": "Pool depth comes straight from the predict-escrow contract. The pot you see is the pot that pays out, and it moves as people bet."
+    },
+    {
+      "id": "ftso-json",
+      "text": "These are the four FTSOv2 feeds the venue runs on. The price on screen is the price settlement uses."
+    },
+    {
+      "id": "bet-enter",
+      "text": "Molfi has three ways to bet, and we'll place all three. First a public one. Pricing is pari-mutuel — winners split the whole pot pro-rata — so the payout estimate moves as the pools fill, shown net of the two percent fee."
+    },
+    {
+      "id": "bet-sign",
+      "text": "Signing on Flare Coston2 now, against the deployed escrow contract. We hold here until the network confirms."
+    },
+    {
+      "id": "bet-result",
+      "text": "Confirmed. The pool, the position panel and the payout estimate all move together, each re-read from the chain."
+    },
+    {
+      "id": "explorer-standard",
+      "text": "Here's that transaction on the Coston2 explorer: FXRP into escrow, and a Bet event carrying the market, the amount and the side. Everything about this bet is legible to anyone."
+    },
+    {
+      "id": "private-tab",
+      "text": "That visibility is what the private mode removes. Your stake goes in as a commitment note at a fixed denomination, so on-chain it looks like every other note of the same size."
+    },
+    {
+      "id": "private-sign",
+      "text": "Signing a confidential bet. The contract receives a commitment — a hash — instead of a side, and the note that opens it stays in your browser."
+    },
+    {
+      "id": "explorer-private",
+      "text": "Same explorer, same escrow. There's a stake and a commitment hash, and no YES or NO anywhere in the transaction. After settlement you claim with a zero-knowledge proof that can't be linked back to this deposit."
+    },
+    {
+      "id": "zk-json",
+      "text": "This is the Groth16 proof the contract verifies — BN254, with public signals for the root, the nullifier, the outcome and the recipient. The nullifier is what stops a note being claimed twice."
+    },
+    {
+      "id": "sealed-tab",
+      "text": "The sealed mode solves something different. A prediction market leaks its own signal: the moment a bet lands, the pool split is public, and late bettors read the crowd instead of the question. Here the split doesn't exist on-chain until the market closes."
+    },
+    {
+      "id": "tee-seal",
+      "text": "That needs somewhere to hold a secret that isn't a server you have to trust. A trusted execution environment is memory the CPU itself keeps encrypted — on Intel TDX, even the host operating system can't read inside it. Molfi's enclave runs as a Flare Confidential Compute image on Phala's dstack, registered on FlareTeeManager and reachable at status two. Your browser encrypts your side to its public key, so the bid arrives as ciphertext. The enclave holds the only key that opens it."
+    },
+    {
+      "id": "tee-key-json",
+      "text": "This is that identity: the enclave's public key, and the signer address the contract checks. When the market closes, the enclave opens every bid, signs the aggregate, and SealedBidBook verifies that signature with ecrecover before it accepts the result."
+    },
+    {
+      "id": "sealed-sign",
+      "text": "Signing the sealed bid. The stake moves publicly — it's a token transfer — but the side travels as ciphertext."
+    },
+    {
+      "id": "explorer-sealed",
+      "text": "And that's what lands on the explorer: a stake, and a sealed blob where the side would be. Three transactions, three different privacy guarantees, one chain."
+    },
+    {
+      "id": "tee-tx-json",
+      "text": "The book records the stake and the bid count while the YES-NO split stays sealed until the enclave opens it."
+    },
+    {
+      "id": "portfolio",
+      "text": "The portfolio is built from chain events — settled positions, realized profit and loss, and a win rate, with the curve drawn from your own trades."
+    },
+    {
+      "id": "vault",
+      "text": "The liquidity vault backs settlement and takes a share of the two percent trading fee. Total value locked, net asset value per share, and the activity feed are all on-chain reads."
+    },
+    {
+      "id": "vault-json",
+      "text": "The same numbers from the vault contract. Share price is unit-priced, so it survives deposits and withdrawals — which is why the yield beside it is net asset value growth."
+    },
+    {
+      "id": "leaderboard",
+      "text": "The leaderboard ranks by realized profit and loss, rebuilt from Bet and Redeem events on the escrow. A confidential bet hides its side, so it lands here unattributed — by design."
+    },
+    {
+      "id": "fdc-json",
+      "text": "Molfi also settles against public JSON APIs through the Flare Data Connector — attestations with their voting rounds, where independent providers reach consensus and the result is verified on-chain as a Merkle proof."
+    },
+    {
+      "id": "guide",
+      "text": "Every piece of this maps to a Flare primitive: FXRP from FAssets as collateral, FTSOv2 for settlement, the Data Connector for web APIs, and Confidential Compute for the sealed book."
+    },
+    {
+      "id": "why-flare",
+      "text": "Which is why it's built on Flare. A prediction market needs a price to settle on, a way to reach the world outside the chain, collateral worth betting, and somewhere to keep a secret. On most chains those are four separate vendors. On Flare they're enshrined protocols secured by one validator set — so Molfi is a set of contracts rather than a stack of integrations."
+    },
+    {
+      "id": "roadmap",
+      "text": "From here: XRP settlement through FAssets on Songbird and then Flare mainnet, sealed markets opened by a quorum of enclaves instead of one, and the Data Connector pointed at sports, elections, and anything else with a public API."
+    },
+    {
+      "id": "outro",
+      "text": "That's Molfi — FXRP collateral, FTSOv2 settlement, and three levels of privacy from fully public to sealed inside an enclave. Every transaction you saw is on the Coston2 explorer. Thanks for watching."
+    }
+  ]
+}

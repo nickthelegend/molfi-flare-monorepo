@@ -800,21 +800,116 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
   });
 
   // A wallet's live escrow positions, read straight from PredictEscrow.
+  // A full escrow walk measures ~24s against the public Coston2 RPC: every
+  // market, two position reads, then the market and its pools. That is longer
+  // than any visitor waits, so the portfolio sat on "Reading your positions…"
+  // forever while the data behind it was fine.
+  //
+  // A plain TTL is not enough on its own. Someone who places a bet and then
+  // opens the portfolio would be served a snapshot taken BEFORE their bet —
+  // a stale answer is worse than a slow one when the missing row is the trade
+  // they just made. So once an address has been asked for, keep it hot: a
+  // background refresh re-walks it on a short cycle, and requests are answered
+  // from a cache that is never more than one cycle behind. Still real chain
+  // reads, just moved off the request path.
+  // Pace it. A walk enqueues thousands of calls into the shared multicall
+  // queue, and everything else — including /api/health — waits behind them:
+  // refreshing every 15s meant one walk was always in flight and the whole API
+  // read as hung. 90s keeps a hot address fresh enough that a bet placed a
+  // minute ago is present, without the venue permanently saturating its own RPC.
+  const POSITIONS_REFRESH = 90_000;
+  const POSITIONS_HOT_FOR = 10 * 60_000;
+  const positionsCache = new Map();
+  const positionsHot = new Map();
+
+  // One walk at a time, process-wide. Two concurrent walks do not go twice as
+  // fast — they just double the queue everyone else is stuck behind.
+  let walkChain = Promise.resolve();
+  const walk = (address, market) => {
+    const next = walkChain.then(() => computePositions(address, market));
+    walkChain = next.catch(() => {});
+    return next;
+  };
+
+  const positionsRefresh = setInterval(() => {
+    for (const [key, hot] of positionsHot) {
+      if (Date.now() - hot.lastAsked > POSITIONS_HOT_FOR) { positionsHot.delete(key); continue; }
+      if (hot.running) continue;
+      hot.running = true;
+      walk(hot.address, hot.market)
+        .then((rows) => positionsCache.set(key, { rows, at: Date.now() }))
+        .catch(() => { /* keep the last good snapshot */ })
+        .finally(() => { hot.running = false; });
+    }
+  }, POSITIONS_REFRESH);
+  positionsRefresh.unref?.();
+
   app.get("/api/onchain/positions/:address", async (req, res) => {
-    // Deliberately NOT served from the index: this is a current snapshot, and
-    // the chain is the source of truth for "what do I hold right now". It has
-    // no tx hashes, because an escrow read has none to give — the tx history
-    // lives in `onchainTrades` (see the log indexer in server.js) and is what
-    // /api/leaderboard and the vault charts aggregate.
+    const address = req.params.address;
+    const market = req.query.market ?? "";
+    const key = `${address}:${market}`;
+    positionsHot.set(key, { ...(positionsHot.get(key) ?? {}), address, market, lastAsked: Date.now() });
+
+    const hit = positionsCache.get(key);
+    if (hit) return res.json(hit.rows);
     try {
-      const address = req.params.address;
-      const ids = req.query.market
-        ? [req.query.market]
-        : await chain.listMarketIds();
+      const rows = await walk(address, market);
+      positionsCache.set(key, { rows, at: Date.now() });
+      return res.json(rows);
+    } catch (e) {
+      console.warn(`[onchain/positions] ${e.message}`);
+      return res.json([]);
+    }
+  });
+
+  /** Run `fn` over `items` with at most `limit` in flight. */
+  async function mapLimit(items, limit, fn) {
+    const out = new Array(items.length);
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (true) {
+          const i = next++;
+          if (i >= items.length) return;
+          out[i] = await fn(items[i]);
+        }
+      }),
+    );
+    return out;
+  }
+
+  async function computePositions(address, market) {
+    // The VALUES still come from the chain — this is a live snapshot, and an
+    // escrow read is the only thing that knows what you hold right now. The
+    // index is used only to decide WHICH markets are worth reading.
+    //
+    // It used to read all of them. At 437 markets that fanned out ~1,700
+    // concurrent calls, and the process was killed outright (SIGKILL) rather
+    // than merely being slow — which is why the portfolio hung forever and the
+    // API went down with it. A wallet has only ever bet on the markets that
+    // emitted a Bet event naming it, so ask the log index for that shortlist
+    // and read those. Falling back to a bounded scan keeps a wallet whose
+    // events have not been indexed yet correct, just slower.
+    {
+      let ids;
+      if (market) {
+        ids = [market];
+      } else {
+        // Case-insensitive on purpose: the indexer stores the checksummed
+        // address, callers send whatever their wallet gave them, and an exact
+        // match on the wrong casing returns nothing — which silently fell back
+        // to scanning all 437 markets and looked like the shortlist "not
+        // working". The collection is small enough that the scan this costs is
+        // irrelevant next to the chain reads it saves.
+        const esc = address.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const touched = await OnchainTrades.distinct("market", {
+          address: new RegExp(`^${esc}$`, "i"),
+        }).catch(() => []);
+        ids = touched.length ? touched : await chain.listMarketIds();
+      }
 
       const rows = (
-        await Promise.all(
-          ids.map(async (id) => {
+        await mapLimit(ids, 12, async (id) => {
             const [yes, no] = await Promise.all([
               chain.escrowPosition(id, 0, address).catch(() => 0),
               chain.escrowPosition(id, 1, address).catch(() => 0),
@@ -848,17 +943,13 @@ export function createApp({ db, chain, zk, keeper = defaultKeeper, lastPrice = {
               payout: resolved ? (won ? payout : 0) : payout,
               strike: mk.strike ?? null,
             };
-          }),
-        )
+        })
       ).filter(Boolean);
 
       rows.sort((a, b) => b.closeTs - a.closeTs);
-      res.json(rows);
-    } catch (e) {
-      console.warn(`[onchain/positions] ${e.message}`);
-      res.json([]);
+      return rows;
     }
-  });
+  }
 
   // ── Off-chain (Mongo) markets ──────────────────────────────────────────────
   app.get("/api/markets", async (req, res) => {

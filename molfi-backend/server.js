@@ -333,9 +333,40 @@ async function main() {
     indexEscrowLogs().catch(warn("escrow indexer")),
     app.locals.reconcileVault().catch(warn("vault reconcile")),
   ]);
+  // Gas circuit breaker.
+  //
+  // A write that fails with "insufficient funds" cannot succeed on retry, but
+  // ensureMarkets/settleDue kept trying every 12-15s regardless. One drained
+  // keeper produced 1,901 failed market creations and ~1,400 repeat resolves in
+  // a single session, and the RPC traffic behind them starved the read path —
+  // /api/health and the portfolio walk both timed out while the node itself was
+  // answering in half a second. Check the balance first, and when it cannot
+  // pay, go quiet and say so once instead of hammering.
+  const MIN_KEEPER_BALANCE = 200_000_000_000_000_000n;   // 0.2 C2FLR
+  let gasGateUntil = 0;
+  let gasGateLogged = false;
+  const keeperCanPay = async () => {
+    if (!web2json.keeper) return true;            // no keeper key: nothing writes
+    if (Date.now() < gasGateUntil) return false;
+    try {
+      const bal = await chain.publicClient.getBalance({ address: web2json.keeper.address });
+      if (bal >= MIN_KEEPER_BALANCE) { gasGateLogged = false; return true; }
+      gasGateUntil = Date.now() + 5 * 60_000;
+      if (!gasGateLogged) {
+        gasGateLogged = true;
+        console.warn(
+          `[molfi-backend] keeper ${web2json.keeper.address} has ${Number(bal) / 1e18} C2FLR — ` +
+          `below ${Number(MIN_KEEPER_BALANCE) / 1e18}. Pausing market creation and settlement for 5 min. Fund it to resume.`,
+        );
+      }
+      return false;
+    } catch { return true; }                       // balance unknown: let it try
+  };
+  const ifFunded = (fn) => async () => { if (await keeperCanPay()) return fn(); };
+
   setInterval(pollPrices, 10_000);
-  setInterval(ensureMarkets, 15_000);
-  setInterval(settleDue, 12_000);
+  setInterval(ifFunded(ensureMarkets), 15_000);
+  setInterval(ifFunded(settleDue), 12_000);
   setInterval(
     () => indexEscrowLogs().catch((e) => console.warn(`[molfi-backend] escrow indexer: ${e.message}`)),
     15_000,
