@@ -7,6 +7,10 @@
 #
 # raw/ alone runs to hundreds of megabytes of JPEG frames.
 raw/
+!out/molfi-logo-480.png
 work/
 out/
 audio/
+
+# the BUIDL tile is a deliverable, not a build artifact
+!out/molfi-logo-480.png
