@@ -21,6 +21,26 @@ const OUT = path.join(HERE, "out");
 const TAKE = path.join(RAW, "take.mp4");
 const W = 1280, H = 712, FPS = 24;
 
+/**
+ * Pace. Nothing is cut — every beat is still here, just delivered faster.
+ *
+ * 1.3x on the narrative and action beats. The static JSON cards are read far
+ * quicker than they are spoken, so they carry 1.6x without losing anything;
+ * pushing the whole film to a single rate would have rushed the parts worth
+ * watching to save time on the parts that are just text on screen.
+ *
+ * atempo preserves pitch, so the voice speeds up without turning into a
+ * chipmunk. Video is ramped to match its own line exactly, beat by beat.
+ */
+const BASE_SPEED = 1.3;
+const FAST_SPEED = 1.6;
+const FAST_BEATS = new Set([
+  "ftso-json", "zk-json", "tee-key-json", "tee-tx-json",
+  "vault-json", "fdc-json", "guide", "markets", "pool-depth",
+]);
+const CARD_SPEED = 1.6;
+const speedFor = (id) => (FAST_BEATS.has(id) ? FAST_SPEED : BASE_SPEED);
+
 const ff = (args) => pexec("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", ...args], { maxBuffer: 1 << 28 });
 const probe = async (f) =>
   Number((await pexec("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", f])).stdout.trim());
@@ -78,22 +98,22 @@ async function main() {
       continue;
     }
 
+    // The line, retimed. This is the length the beat now has to fill.
+    const sp = speedFor(m.id);
+    const target = narration / sp;
+
     let vf;
-    if (footage > narration) {
-      // Footage runs long → ramp it to fit the line exactly.
-      const speed = footage / narration;
-      vf = `[0:v]setpts=PTS/${speed.toFixed(6)},fps=${FPS},scale=${W}:${H}[v]`;
+    if (footage > target) {
+      const vspeed = footage / target;
+      vf = `[0:v]setpts=PTS/${vspeed.toFixed(6)},fps=${FPS},scale=${W}:${H}[v]`;
     } else {
-      // Footage runs short → hold the last frame. Clamp at zero: the arithmetic
-      // can land a hair negative and ffmpeg rejects a negative pad outright.
-      const pad = Math.max(0, narration - footage);
+      const pad = Math.max(0, target - footage);
       vf = `[0:v]fps=${FPS},scale=${W}:${H},tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)}[v]`;
     }
 
     await ff(["-ss", String(start), "-t", String(footage), "-i", TAKE, "-i", audio,
-      "-filter_complex", vf,
-      "-map", "[v]", "-map", "1:a",
-      "-af", "apad",                       // apad BEFORE -shortest, or the tail is clipped
+      "-filter_complex", `${vf};[1:a]atempo=${sp.toFixed(4)},apad[a]`,
+      "-map", "[v]", "-map", "[a]",
       "-shortest",
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
       "-c:a", "aac", "-ar", "48000", "-ac", "2", "-pix_fmt", "yuv420p", seg]);
@@ -105,7 +125,7 @@ async function main() {
       .lines.find((l) => l.id === m.id)?.text ?? "";
     srt += `${segs.length}\n${ts(timeline)} --> ${ts(timeline + actual)}\n${text}\n\n`;
     timeline += actual;
-    console.log(`  ${m.id.padEnd(16)} footage ${footage.toFixed(1)}s → ${actual.toFixed(1)}s${m.signing ? "  [SIGNING]" : ""}`);
+    console.log(`  ${m.id.padEnd(16)} ${narration.toFixed(1)}s @${sp}x → ${actual.toFixed(1)}s${m.signing ? "  [SIGNING]" : ""}`);
   }
 
   await writeFile(path.join(OUT, "molfi-demo.srt"), srt);
@@ -116,13 +136,24 @@ async function main() {
   // a glow that keeps drifting. ffmpeg used to zoompan across a single still,
   // which is a camera move over static type and read exactly like one. Nothing
   // to composite now; just use the clips.
-  const title = path.join(WORK, "intro.mp4");
-  const outro = path.join(WORK, "outro.mp4");
-  for (const f of [title, outro]) {
+  const rawTitle = path.join(WORK, "intro.mp4");
+  const rawOutro = path.join(WORK, "outro.mp4");
+  for (const f of [rawTitle, rawOutro]) {
     try { await probe(f); } catch {
       throw new Error(`MISSING_CARD: ${f} — run \`node demo/cards.mjs\` first`);
     }
   }
+  // Cards hold the same frame longest, so they gain the most from pace.
+  const quicken = async (src, out) => {
+    await ff(["-i", src, "-filter_complex",
+      `[0:v]setpts=PTS/${CARD_SPEED},fps=${FPS},scale=${W}:${H}[v];anullsrc=r=48000:cl=stereo[a]`,
+      "-map", "[v]", "-map", "[a]", "-shortest",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+      "-c:a", "aac", "-ar", "48000", "-ac", "2", "-pix_fmt", "yuv420p", out]);
+    return out;
+  };
+  const title = await quicken(rawTitle, path.join(WORK, "intro-fast.mp4"));
+  const outro = await quicken(rawOutro, path.join(WORK, "outro-fast.mp4"));
 
   // ── concat: intro + body + outro ──────────────────────────────────────────
   const list = path.join(WORK, "concat.txt");
