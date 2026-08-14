@@ -1,7 +1,7 @@
 {
   "voice": "am_michael",
-  "generatedAtIso": "2026-08-14T17:40:29.680Z",
-  "totalSec": 390.3,
+  "generatedAtIso": "2026-08-14T19:17:07.873Z",
+  "totalSec": 411.475,
   "durations": {
     "intro": 11.85,
     "markets": 13.175,
@@ -23,11 +23,13 @@
     "explorer-sealed": 11.45,
     "tee-tx-json": 8.25,
     "portfolio": 10.775,
-    "vault": 12.675,
+    "vault": 8.75,
+    "vault-sign": 10.6,
+    "explorer-vault": 12.15,
     "vault-json": 12.45,
     "leaderboard": 13.5,
     "fdc-json": 16.325,
-    "guide": 14.625,
+    "guide": 16.975,
     "why-flare": 24.75,
     "roadmap": 17.225,
     "outro": 15.9

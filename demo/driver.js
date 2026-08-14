@@ -525,6 +525,31 @@
 
     line("portfolio");   await go("/portfolio"); await hold();
     line("vault");       await go("/vault");     await hold();
+
+    line("vault-sign");
+      signingOverlay();
+      const vAmt = [...document.querySelectorAll("input")].find((i) => i.type === "number" && i.offsetParent);
+      if (vAmt) { hideOverlay(); await typeInto(vAmt, "1"); signingOverlay(); }
+      await sleep(700);
+      const vBtn = byText(/^Deposit to vault/i);
+      if (!vBtn || vBtn.disabled) {
+        hideOverlay();
+        const why = (document.body.innerText.match(/(needs? .*|insufficient .*|not enough .*)/i) || [])[0];
+        throw new Error(`VAULT_BUTTON_UNAVAILABLE${why ? ` — page says: ${why.slice(0, 110)}` : ""}`);
+      }
+      const vaultBefore = txHashes().length;
+      vBtn.click();
+      await until("vault-confirmed", () => txHashes().length > vaultBefore, 300000);
+      reportTx();
+      hideOverlay(); await hold();
+
+    const vaultTx = (() => {
+      const u = lastTxUrl();
+      if (!u || u === sealedTx) throw new Error("NO_VAULT_TX");
+      return u;
+    })();
+    line("explorer-vault");
+      await explorerBeat(vaultTx);
     line("vault-json");  slide("GET /api/vaults — read from MolfiLpVault", await getJson(API + "/vaults"),
       "Share price is unit-priced, so it survives deposits and withdrawals.");
       await hold(); hideOverlay();

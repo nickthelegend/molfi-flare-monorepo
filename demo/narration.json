@@ -83,7 +83,15 @@
     },
     {
       "id": "vault",
-      "text": "The liquidity vault backs settlement and takes a share of the two percent trading fee. Total value locked, net asset value per share, and the activity feed are all on-chain reads."
+      "text": "The liquidity vault backs settlement and earns a share of the two percent trading fee. Let's put real FXRP into it."
+    },
+    {
+      "id": "vault-sign",
+      "text": "Depositing one FXRP. The vault mints shares against it, unit-priced, so the share price survives every later deposit and withdrawal."
+    },
+    {
+      "id": "explorer-vault",
+      "text": "There's the deposit on the explorer — FXRP into the vault contract, shares minted back. Total value locked and net asset value per share both move to match."
     },
     {
       "id": "vault-json",
@@ -99,7 +107,7 @@
     },
     {
       "id": "guide",
-      "text": "Every piece of this maps to a Flare primitive: FXRP from FAssets as collateral, FTSOv2 for settlement, the Data Connector for web APIs, and Confidential Compute for the sealed book."
+      "text": "Every piece of this maps to a Flare primitive — FXRP for collateral, FTSOv2 for settlement, the Data Connector for web APIs, Confidential Compute for the sealed book. The guide walks through each one if you want the detail."
     },
     {
       "id": "why-flare",

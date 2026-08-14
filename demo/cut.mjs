@@ -32,14 +32,20 @@ const W = 1280, H = 712, FPS = 24;
  * atempo preserves pitch, so the voice speeds up without turning into a
  * chipmunk. Video is ramped to match its own line exactly, beat by beat.
  */
-const BASE_SPEED = 1.3;
-const FAST_SPEED = 1.6;
+const BASE_SPEED = 1.3;   // narrative and action beats
+const MID_SPEED  = 1.55;  // pages you read rather than watch
+const FAST_SPEED = 1.6;   // raw JSON on screen
 const FAST_BEATS = new Set([
   "ftso-json", "zk-json", "tee-key-json", "tee-tx-json",
   "vault-json", "fdc-json", "guide", "markets", "pool-depth",
 ]);
+const MID_BEATS = new Set([
+  "explorer-standard", "explorer-private", "explorer-sealed", "explorer-vault",
+  "leaderboard", "sealed-tab", "portfolio", "bet-result",
+]);
 const CARD_SPEED = 1.6;
-const speedFor = (id) => (FAST_BEATS.has(id) ? FAST_SPEED : BASE_SPEED);
+const speedFor = (id) =>
+  FAST_BEATS.has(id) ? FAST_SPEED : MID_BEATS.has(id) ? MID_SPEED : BASE_SPEED;
 
 const ff = (args) => pexec("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", ...args], { maxBuffer: 1 << 28 });
 const probe = async (f) =>
@@ -56,6 +62,8 @@ async function main() {
   await mkdir(OUT, { recursive: true });
 
   const durations = JSON.parse(await readFile(path.join(HERE, "durations.json"), "utf8")).durations;
+  try { await probe(path.join(WORK, "subs", "intro.png")); }
+  catch { throw new Error("MISSING_CAPTIONS: run `node demo/subs.mjs` first"); }
   const beatsRaw = (await readFile(path.join(RAW, "beats.log"), "utf8")).trim().split("\n");
   const marks = beatsRaw.map((l) => {
     const m = /^DEMO_LINE (\d+) (\S+)( SIGNING)?/.exec(l);
@@ -111,9 +119,21 @@ async function main() {
       vf = `[0:v]fps=${FPS},scale=${W}:${H},tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)}[v]`;
     }
 
-    await ff(["-ss", String(start), "-t", String(footage), "-i", TAKE, "-i", audio,
-      "-filter_complex", `${vf};[1:a]atempo=${sp.toFixed(4)},apad[a]`,
-      "-map", "[v]", "-map", "[a]",
+    // Burn the caption in. No `subtitles`/`ass`/`drawtext` in this ffmpeg build,
+    // so each line is a pre-rendered transparent PNG (demo/subs.mjs) overlaid on
+    // the one segment it belongs to — which also means it can never drift out of
+    // sync, since the segment IS the line.
+    const capPng = path.join(WORK, "subs", `${m.id}.png`);
+    const hasCap = await probe(capPng).then(() => true).catch(() => true);
+    const capIn = hasCap ? ["-i", capPng] : [];
+    const capFilter = hasCap
+      ? `${vf};[v][2:v]overlay=(main_w-overlay_w)/2:main_h-overlay_h-26[vo]`
+      : vf;
+    const vOut = hasCap ? "[vo]" : "[v]";
+
+    await ff(["-ss", String(start), "-t", String(footage), "-i", TAKE, "-i", audio, ...capIn,
+      "-filter_complex", `${capFilter};[1:a]atempo=${sp.toFixed(4)},apad[a]`,
+      "-map", vOut, "-map", "[a]",
       "-shortest",
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
       "-c:a", "aac", "-ar", "48000", "-ac", "2", "-pix_fmt", "yuv420p", seg]);
