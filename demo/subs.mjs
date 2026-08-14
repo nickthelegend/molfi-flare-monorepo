@@ -32,18 +32,21 @@ const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">":
  * 712px frame, which would have sat over the bottom third of the very slide it
  * describes. Scale with the text so no caption swallows the picture.
  */
-const sizeFor = (t) => (t.length > 240 ? 19 : t.length > 170 ? 21 : 23);
+const sizeFor = (t) => (t.length > 240 ? 16 : t.length > 170 ? 17 : 18);
+// A long line in a narrow box just gets taller. Widen it instead, so the extra
+// text buys columns rather than rows.
+const widthFor = (t) => (t.length > 240 ? 1020 : t.length > 170 ? 940 : 860);
 
 const page = (text) => `<style>
   html,body{margin:0;padding:0;background:transparent}
   #wrap{width:${W}px;display:flex;justify-content:center;align-items:flex-start}
   #cap{
-    max-width:1120px;
+    max-width:${widthFor(text)}px;
     background:rgba(0,0,0,.82);
     color:#fff;
     font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;
-    font-size:${sizeFor(text)}px; line-height:1.38; font-weight:500;
-    padding:11px 20px; border-radius:7px;
+    font-size:${sizeFor(text)}px; line-height:1.34; font-weight:500;
+    padding:7px 14px; border-radius:6px;
     text-align:center; letter-spacing:.005em;
     text-wrap:balance;
   }
