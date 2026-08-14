@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 /**
- * Burned-in captions — one transparent PNG per narration line.
+ * Burned-in captions — ONE line on screen at a time.
  *
  * This ffmpeg has no `subtitles`, no `ass` and no `drawtext` (built without
  * libass and libfreetype), so the usual one-liner is not available. Text is
- * laid out in Chrome instead — real typeface, real wrapping — captured on a
- * transparent background, and `overlay` composites it onto the beat it belongs
- * to. cut.mjs already builds one segment per line, so each caption only has to
- * sit over its own segment; no timing table, nothing to drift out of sync.
+ * laid out in Chrome instead — real typeface, real metrics — captured on a
+ * transparent background, and `overlay` composites it.
  *
- *   node demo/subs.mjs   ->  demo/work/subs/<id>.png
+ * A whole narration line rendered as one block sat two and three rows deep over
+ * the UI it was describing. So each line is split into single-row chunks at
+ * word boundaries, one PNG each, and cut.mjs shows them in turn across the
+ * beat — weighted by character count, which tracks speech closely enough that
+ * nothing lands early or lingers.
+ *
+ *   node demo/subs.mjs   ->  demo/work/subs/<id>-<n>.png + manifest.json
  */
 import { spawn } from "node:child_process";
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
@@ -18,40 +22,47 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(HERE, "work", "subs");
-const W = 1280, H = 260, PORT = 9366;   // H is generous; the box is measured after layout
+const W = 1280, H = 200, PORT = 9366;
+const FONT = 18;
+const MAX_CHARS = 58;          // one comfortable row at FONT px
 const CHROME = process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
 
-/** White text on a black box — small, centred, two or three lines at most. */
 /**
- * Long lines get a smaller face and a wider box.
+ * Split into rows of at most MAX_CHARS, never mid-word.
  *
- * At one size the longest narration line rendered five lines tall — 218px on a
- * 712px frame, which would have sat over the bottom third of the very slide it
- * describes. Scale with the text so no caption swallows the picture.
+ * Prefers to end a chunk on punctuation when one falls near the limit, so a
+ * break lands where a reader would pause anyway rather than mid-clause.
  */
-const sizeFor = (t) => (t.length > 240 ? 16 : t.length > 170 ? 17 : 18);
-// A long line in a narrow box just gets taller. Widen it instead, so the extra
-// text buys columns rather than rows.
-const widthFor = (t) => (t.length > 240 ? 1020 : t.length > 170 ? 940 : 860);
+function chunk(text) {
+  const words = text.split(/\s+/);
+  const out = [];
+  let cur = "";
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (next.length > MAX_CHARS && cur) { out.push(cur); cur = w; }
+    else cur = next;
+    if (cur.length >= MAX_CHARS - 14 && /[—,.:;]$/.test(cur)) { out.push(cur); cur = ""; }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
 
-const page = (text) => `<style>
+const page = (line) => `<style>
   html,body{margin:0;padding:0;background:transparent}
   #wrap{width:${W}px;display:flex;justify-content:center;align-items:flex-start}
   #cap{
-    max-width:${widthFor(text)}px;
-    background:rgba(0,0,0,.82);
-    color:#fff;
+    background:rgba(0,0,0,.82); color:#fff;
     font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;
-    font-size:${sizeFor(text)}px; line-height:1.34; font-weight:500;
-    padding:7px 14px; border-radius:6px;
-    text-align:center; letter-spacing:.005em;
-    text-wrap:balance;
+    font-size:${FONT}px; line-height:1.3; font-weight:500;
+    padding:6px 14px; border-radius:6px;
+    white-space:nowrap;              /* one row, always */
+    letter-spacing:.005em;
   }
 </style>
-<div id="wrap"><div id="cap">${esc(text)}</div></div>`;
+<div id="wrap"><div id="cap">${esc(line)}</div></div>`;
 
 async function main() {
   await rm(OUT, { recursive: true, force: true });
@@ -85,28 +96,37 @@ async function main() {
     new Promise((res) => { const i = ++id; pend.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
 
   await send("Page.enable");
-  // Transparent, so only the caption box lands on the frame.
   await send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } });
 
+  const manifest = {};
+  let total = 0, tallest = 0, widest = 0;
   for (const l of lines) {
-    await send("Page.navigate", { url: "data:text/html;charset=utf-8," + encodeURIComponent(page(l.text)) });
-    await sleep(260);
-    // Measure the laid-out box so the PNG is exactly the caption, no padding to
-    // position around later.
-    const box = await send("Runtime.evaluate", {
-      expression: `(() => { const r = document.getElementById("cap").getBoundingClientRect();
-        return JSON.stringify({x:Math.floor(r.x),y:Math.floor(r.y),w:Math.ceil(r.width),h:Math.ceil(r.height)}); })()`,
-      returnByValue: true,
-    });
-    const b = JSON.parse(box.result.value);
-    const shot = await send("Page.captureScreenshot", {
-      format: "png", captureBeyondViewport: true,
-      clip: { x: b.x, y: b.y, width: b.w, height: b.h, scale: 1 },
-    });
-    await writeFile(path.join(OUT, `${l.id}.png`), Buffer.from(shot.data, "base64"));
+    const parts = chunk(l.text);
+    manifest[l.id] = [];
+    for (const [i, part] of parts.entries()) {
+      await send("Page.navigate", { url: "data:text/html;charset=utf-8," + encodeURIComponent(page(part)) });
+      await sleep(180);
+      const box = await send("Runtime.evaluate", {
+        expression: `(() => { const r = document.getElementById("cap").getBoundingClientRect();
+          return JSON.stringify({x:Math.floor(r.x),y:Math.floor(r.y),w:Math.ceil(r.width),h:Math.ceil(r.height)}); })()`,
+        returnByValue: true,
+      });
+      const b = JSON.parse(box.result.value);
+      tallest = Math.max(tallest, b.h);
+      widest = Math.max(widest, b.w);
+      const file = `${l.id}-${i}.png`;
+      const shot = await send("Page.captureScreenshot", {
+        format: "png", captureBeyondViewport: true,
+        clip: { x: b.x, y: b.y, width: b.w, height: b.h, scale: 1 },
+      });
+      await writeFile(path.join(OUT, file), Buffer.from(shot.data, "base64"));
+      manifest[l.id].push({ file, chars: part.length });
+      total++;
+    }
   }
 
-  console.log(`captions: ${lines.length} PNGs -> ${OUT}`);
+  await writeFile(path.join(OUT, "manifest.json"), JSON.stringify(manifest, null, 2));
+  console.log(`captions: ${total} single-row PNGs across ${lines.length} lines — tallest ${tallest}px, widest ${widest}px`);
   ws.close(); chrome.kill();
 }
 

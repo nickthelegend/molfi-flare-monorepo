@@ -62,8 +62,9 @@ async function main() {
   await mkdir(OUT, { recursive: true });
 
   const durations = JSON.parse(await readFile(path.join(HERE, "durations.json"), "utf8")).durations;
-  try { await probe(path.join(WORK, "subs", "intro.png")); }
-  catch { throw new Error("MISSING_CAPTIONS: run `node demo/subs.mjs` first"); }
+  const captions = await readFile(path.join(WORK, "subs", "manifest.json"), "utf8")
+    .then(JSON.parse)
+    .catch(() => { throw new Error("MISSING_CAPTIONS: run `node demo/subs.mjs` first"); });
   const beatsRaw = (await readFile(path.join(RAW, "beats.log"), "utf8")).trim().split("\n");
   const marks = beatsRaw.map((l) => {
     const m = /^DEMO_LINE (\d+) (\S+)( SIGNING)?/.exec(l);
@@ -119,17 +120,34 @@ async function main() {
       vf = `[0:v]fps=${FPS},scale=${W}:${H},tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)}[v]`;
     }
 
-    // Burn the caption in. No `subtitles`/`ass`/`drawtext` in this ffmpeg build,
-    // so each line is a pre-rendered transparent PNG (demo/subs.mjs) overlaid on
-    // the one segment it belongs to — which also means it can never drift out of
-    // sync, since the segment IS the line.
-    const capPng = path.join(WORK, "subs", `${m.id}.png`);
-    const hasCap = await probe(capPng).then(() => true).catch(() => true);
-    const capIn = hasCap ? ["-i", capPng] : [];
-    const capFilter = hasCap
-      ? `${vf};[v][2:v]overlay=(main_w-overlay_w)/2:main_h-overlay_h-26[vo]`
-      : vf;
-    const vOut = hasCap ? "[vo]" : "[v]";
+    // Burn the captions in, ONE row at a time. No `subtitles`/`ass`/`drawtext`
+    // in this ffmpeg build, so each chunk is a pre-rendered transparent PNG
+    // (demo/subs.mjs) shown for its share of the beat.
+    //
+    // Share is by character count. Speech rate is near enough constant within a
+    // line that this tracks the voice without a per-word alignment pass, and
+    // because every chunk lives inside its own segment nothing can drift out of
+    // sync across the film.
+    const parts = captions[m.id] ?? [];
+    const capIn = parts.flatMap((p) => ["-i", path.join(WORK, "subs", p.file)]);
+    let capFilter = vf;
+    let vOut = "[v]";
+    if (parts.length) {
+      const totalChars = parts.reduce((a, p) => a + p.chars, 0) || 1;
+      let acc = 0;
+      parts.forEach((p, k) => {
+        const from = (acc / totalChars) * target;
+        acc += p.chars;
+        // Last chunk runs to the end of the beat, so rounding can never leave a
+        // gap with no caption on screen.
+        const to = k === parts.length - 1 ? target + 1 : (acc / totalChars) * target;
+        const src = vOut;
+        const dst = `[c${k}]`;
+        capFilter += `;${src}[${k + 2}:v]overlay=(main_w-overlay_w)/2:main_h-overlay_h-24:` +
+                     `enable='between(t,${from.toFixed(3)},${to.toFixed(3)})'${dst}`;
+        vOut = dst;
+      });
+    }
 
     await ff(["-ss", String(start), "-t", String(footage), "-i", TAKE, "-i", audio, ...capIn,
       "-filter_complex", `${capFilter};[1:a]atempo=${sp.toFixed(4)},apad[a]`,
